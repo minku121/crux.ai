@@ -15,12 +15,18 @@ interface Message {
   timestamp: Date
 }
 
-export function AIChat() {
+interface AIChatProps {
+  activeFile: string | null;
+  files: Record<string, { content: string; language: string }>;
+  onFileChange: (path: string, newContent: string) => void;
+}
+
+export function AIChat({ activeFile, files, onFileChange }: AIChatProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
       content:
-        "Hello! I'm your AI coding assistant. I can help you with code reviews, debugging, explanations, and suggestions. What would you like to work on?",
+        "Hello! I'm your AI coding assistant. Try commands like:\n- `/insert <code>`\n- `/replace <old> with <new>`\n- `/set <code>`\n- `/clear`\nWhat would you like to work on?",
       role: "assistant",
       timestamp: new Date(),
     },
@@ -43,28 +49,86 @@ export function AIChat() {
     setInput("")
     setIsLoading(true)
 
-    // Simulate AI response
+    let assistantResponseText = "";
+    let commandProcessed = false;
+
+    if (input.startsWith("/")) { // Potential command
+        if (activeFile && files && files[activeFile] && onFileChange) {
+            const currentContent = files[activeFile].content;
+
+            if (input.startsWith("/insert ")) {
+                const codeToInsert = input.substring("/insert ".length);
+                const newContent = codeToInsert + "\n" + currentContent;
+                onFileChange(activeFile, newContent);
+                assistantResponseText = `Okay, I've inserted the code into ${activeFile}.`;
+                commandProcessed = true;
+            } else if (input.startsWith("/replace ") && input.includes(" with ")) {
+                const parts = input.substring("/replace ".length).split(" with ");
+                if (parts.length === 2) {
+                    const oldText = parts[0].trim(); // Trim to avoid issues with spaces
+                    const newText = parts[1].trim(); // Trim to avoid issues with spaces
+                    if (oldText) { // Ensure oldText is not empty
+                        const newContent = currentContent.split(oldText).join(newText);
+                        if (currentContent !== newContent) {
+                            onFileChange(activeFile, newContent);
+                            assistantResponseText = `Okay, I've replaced "${oldText}" with "${newText}" in ${activeFile}.`;
+                        } else {
+                            assistantResponseText = `I couldn't find "${oldText}" in ${activeFile}.`;
+                        }
+                    } else {
+                         assistantResponseText = "Invalid /replace command: <oldText> cannot be empty.";
+                    }
+                    commandProcessed = true;
+                } else {
+                    assistantResponseText = "Invalid /replace command format. Use `/replace <oldText> with <newText>`.";
+                    commandProcessed = true;
+                }
+            } else if (input.startsWith("/set ")) {
+                const codeToSet = input.substring("/set ".length);
+                onFileChange(activeFile, codeToSet);
+                assistantResponseText = `Okay, I've set the content of ${activeFile}.`;
+                commandProcessed = true;
+            } else if (input.trim() === "/clear" || input.trim() === "/delete") {
+                onFileChange(activeFile, "");
+                assistantResponseText = `Okay, I've cleared the content of ${activeFile}.`;
+                commandProcessed = true;
+            } else {
+                 // Unknown command
+                assistantResponseText = `I don't recognize the command "${input.split(" ")[0]}". Try /insert, /replace, /set, or /clear.`;
+                commandProcessed = true;
+            }
+        } else {
+            // A command was issued but no file is active or available
+            assistantResponseText = "Please select an active file before I can perform code modifications with commands.";
+            commandProcessed = true;
+        }
+    }
+
+    if (!commandProcessed) {
+      // Default AI response if no command was processed
+      const genericResponses = [
+        "I can help you with that! Let me analyze your code and provide some suggestions.",
+        "That's a great question! Here's what I think about your approach...",
+        "I notice you're working on a React component. Here are some best practices you might consider:",
+        "Let me help you debug that issue. Can you show me the specific error you're encountering?",
+        "That's an interesting implementation! Here's how you could optimize it further:",
+      ];
+      assistantResponseText = genericResponses[Math.floor(Math.random() * genericResponses.length)];
+    }
+
+    // Simulate AI response (slightly faster for commands)
     setTimeout(
       () => {
-        const responses = [
-          "I can help you with that! Let me analyze your code and provide some suggestions.",
-          "That's a great question! Here's what I think about your approach...",
-          "I notice you're working on a React component. Here are some best practices you might consider:",
-          "Let me help you debug that issue. Can you show me the specific error you're encountering?",
-          "That's an interesting implementation! Here's how you could optimize it further:",
-        ]
-
         const assistantMessage: Message = {
           id: (Date.now() + 1).toString(),
-          content: responses[Math.floor(Math.random() * responses.length)],
+          content: assistantResponseText,
           role: "assistant",
           timestamp: new Date(),
         }
-
         setMessages((prev) => [...prev, assistantMessage])
         setIsLoading(false)
       },
-      1000 + Math.random() * 2000,
+      commandProcessed ? 500 : (1000 + Math.random() * 1000)
     )
   }
 
