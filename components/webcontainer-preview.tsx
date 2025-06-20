@@ -14,7 +14,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 let webContainerPromise: Promise<WebContainer> | null = null;
 
@@ -34,7 +33,6 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
   const [logs, setLogs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showLogs, setShowLogs] = useState(false);
 
   const webContainerRef = useRef<WebContainer | null>(null);
   const processRef = useRef<any>(null);
@@ -54,22 +52,17 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
 
   const convertToFileTree = (filesObj: Record<string, { content: string; language: string }>) => {
     const tree: any = {};
-
     Object.entries(filesObj).forEach(([path, { content }]) => {
       if (path.includes("node_modules/")) return;
-
       if (content.startsWith('// Binary file:') && !path.endsWith('.ico')) {
         addLog(`Skipping binary file: ${path}`);
         return;
       }
-
       const parts = path.split("/");
       let current = tree;
-
       for (let i = 0; i < parts.length; i++) {
         const part = parts[i];
         const isFile = i === parts.length - 1;
-
         if (isFile) {
           current[part] = { file: { contents: content } };
         } else {
@@ -78,7 +71,6 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
         }
       }
     });
-
     return tree;
   };
 
@@ -91,7 +83,6 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
         if (deps?.next) return "next";
         if (deps?.vite) return "vite";
       }
-
       if (Object.keys(files).some((p) => p.endsWith(".html"))) return "html";
       return null;
     } catch (err) {
@@ -103,10 +94,9 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
   const getDevCommand = (type: AppType, port?: string): string[] => {
     switch (type) {
       case "next":
-        // Next.js respects the PORT env variable, but also allow --port for explicitness
         return ["npm", "run", "dev", "--", "-p", port || "3000"];
       case "vite":
-        return ["npm", "run", "dev" ];
+        return ["npm", "run", "dev"];
       case "html":
         return ["npx", "serve", ".", "-p", port || "3001", "--listen", "0.0.0.0"];
       default:
@@ -149,7 +139,6 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
       }
 
       const wc = webContainerRef.current;
-
       const detected = detectAppType(files);
       setAppType(detected);
       addLog(`🔍 Detected app type: ${detected || "unknown"}`);
@@ -157,50 +146,63 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
       if (!detected) throw new Error("Unsupported app type. Only Next.js, Vite, or HTML supported.");
 
       const tree = convertToFileTree(files);
-
       await wc.mount(tree);
       addLog("📁 Files mounted");
 
       if (needsInstallation(detected)) {
         updateStatus("installing");
         addLog("📦 Installing dependencies...");
-
         const install = await wc.spawn("npm", ["install"]);
-        install.output.pipeTo(
-          new WritableStream({ write: (data) => addLog(`📦 ${data}`) })
-        );
-
+        install.output.pipeTo(new WritableStream({ write: (data) => addLog(`📦 ${data}`) }));
         const code = await install.exit;
         if (code !== 0) throw new Error(`npm install failed with code ${code}`);
         addLog("✅ Dependencies installed");
       }
 
       updateStatus("running");
-      const cmd = getDevCommand(detected);
-      addLog(`🚀 Running dev server: ${cmd.join(" ")}`);
 
-      const randomPort = `${3000 + Math.floor(Math.random() * 1000)}`;
+      let attempt = 0;
+      const maxAttempts = 5;
+      let success = false;
 
-      processRef.current = await wc.spawn(cmd[0], cmd.slice(1), {
-        env: { NODE_ENV: "development", PORT: randomPort },
-      });
+      while (!success && attempt < maxAttempts) {
+        const randomPort = `${3000 + Math.floor(Math.random() * 1000)}`;
+        const cmd = getDevCommand(detected, randomPort);
+        addLog(`🚀 Attempt ${attempt + 1}: Running dev server on port ${randomPort} with ${cmd.join(" ")}`);
 
-      processRef.current.output.pipeTo(
-        new WritableStream({ write: (data) => addLog(`📄 ${data}`) })
-      );
+        try {
+          processRef.current = await wc.spawn(cmd[0], cmd.slice(1), {
+            env: { NODE_ENV: "development", PORT: randomPort },
+          });
 
-      wc.on("server-ready", (port, serverUrl) => {
-        const finalUrl = serverUrl.startsWith("http") ? serverUrl : `http://${serverUrl}`;
-        setUrl(finalUrl);
-        addLog(`✅ Server ready on ${finalUrl}`);
-      });
+          processRef.current.output.pipeTo(
+            new WritableStream({ write: (data) => addLog(`📄 ${data}`) })
+          );
 
-      processRef.current.exit.then((code: number) => {
-        if (code !== 0) {
-          addLog(`❌ Server exited with code ${code}`);
-          updateStatus("error");
+          wc.on("server-ready", (port, serverUrl) => {
+            const finalUrl = serverUrl.startsWith("http") ? serverUrl : `http://${serverUrl}`;
+            setUrl(finalUrl);
+            addLog(`✅ Server ready on ${finalUrl}`);
+            success = true;
+          });
+
+          await processRef.current.exit.then((code: number) => {
+            if (code !== 0 && !success) {
+              addLog(`❌ Server exited with code ${code}`);
+              attempt++;
+            }
+          });
+
+          if (!success) throw new Error("Port conflict or server failed");
+
+        } catch (err:any) {
+          addLog(`⚠️ Retrying with new port due to error: ${err.message}`);
+          attempt++;
         }
-      });
+      }
+
+      if (!success) throw new Error("Unable to start server after multiple attempts");
+
     } catch (err: any) {
       const msg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
       setError(msg);
@@ -222,18 +224,20 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
   }, [files]);
 
   return (
-    <div className="h-full flex flex-col bg-background/20">
+    <div className={`h-full flex flex-col bg-background/20 ${isFullscreen ? "fixed inset-0 z-50 bg-black" : ""}`}>
       <div className="h-10 border-b border-border/50 flex items-center justify-between px-3 bg-background/30">
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className={`text-white border-0 text-xs`}>
-            {status}
-          </Badge>
-          {appType && (
-            <Badge variant="secondary" className="text-xs">
-              {appType.toUpperCase()}
-            </Badge>
-          )}
+          <Badge variant="outline" className={`text-white border-0 text-xs`}>{status}</Badge>
+          {appType && <Badge variant="secondary" className="text-xs">{appType.toUpperCase()}</Badge>}
           <span className="text-sm font-medium">Live Preview</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setIsFullscreen((prev) => !prev)}>
+            <Maximize2 className="w-4 h-4" />
+          </Button>
+          <Button variant="ghost" size="sm" onClick={startPreview}>
+            <RefreshCw className="w-4 h-4" />
+          </Button>
         </div>
       </div>
       {error && (
