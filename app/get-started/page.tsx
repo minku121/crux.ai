@@ -36,9 +36,6 @@ export default function GetStartedPage() {
   const [projectDescription, setProjectDescription] = useState("")
   const router = useRouter()
 
-  const [isCloning, setIsCloning] = useState<boolean>(false);
-  const [cloneError, setCloneError] = useState<string | null>(null);
-
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, { content: string; language: string }>>({})
   const [isProcessingFiles, setIsProcessingFiles] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -91,42 +88,6 @@ export default function GetStartedPage() {
     { name: "Python Flask", description: "Flask web application" },
   ]
 
-  const projectTemplates: Record<string, Record<string, { content: string; language: string }>> = {
-    "html-css-js": {
-      "index.html": {
-        content:
-          '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>HTML/CSS/JS Project</title>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <h1>Hello from your Template!</h1>\n  <p>This is a basic HTML, CSS, and JavaScript project.</p>\n  <script src="script.js"></script>\n</body>\n</html>',
-        language: "html",
-      },
-      "style.css": {
-        content:
-          "body {\n  font-family: Arial, sans-serif;\n  margin: 0;\n  padding: 0;\n  background-color: #f4f4f4;\n  color: #333;\n  display: flex;\n  justify-content: center;\n  align-items: center;\n  height: 100vh;\n  text-align: center;\n}\n\nh1 {\n  color: #007bff;\n}\n\np {\n  font-size: 1.1em;\n}",
-        language: "css",
-      },
-      "script.js": {
-        content: 'console.log("Hello from the template script.js!");\n\n// You can add more JavaScript here\ndocument.addEventListener("DOMContentLoaded", () => {\n  const heading = document.querySelector("h1");\n  heading.textContent = "Hello from JavaScript!";\n});',
-        language: "javascript",
-      },
-    },
-    "react-simple": {
-      "index.html": {
-        content:
-          '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>Simple React App</title>\n</head>\n<body>\n  <div id="root"></div>\n  <!-- Normally, you would have script tags for React and ReactDOM here, or use a bundler -->\n  <!-- For this template, App.js is provided as a conceptual file -->\n  <script>\n    // Basic "manual" rendering for a super simple React-like component concept\n    function App() {\n      return {\n        type: "div",\n        props: {\n          children: [\n            { type: "h1", props: { children: "Hello from Simple React!" } },\n            { type: "p", props: { children: "This is a conceptual React component." } }\n          ]\n        }\n      };\n    }\n\n    function render(element, container) {\n      if (typeof element.type === "function") {\n        render(element.type(element.props), container);\n        return;\n      }\n      const dom = document.createElement(element.type);\n      if (element.props && element.props.children) {\n        if (Array.isArray(element.props.children)) {\n          element.props.children.forEach(child => render(child, dom));\n        } else {\n          dom.appendChild(document.createTextNode(element.props.children));\n        }\n      }\n      container.appendChild(dom);\n    }\n\n    render({ type: App }, document.getElementById("root"));\n  </script>\n</body>\n</html>',
-        language: "html",
-      },
-      "src/App.js": {
-        content:
-          '// This is a conceptual React component.\n// In a real React setup, you would use JSX and import React.\n\nfunction App() {\n  // Imagine this returns JSX like:\n  // return (\n  //   <div>\n  //     <h1>Hello from Simple React!</h1>\n  //     <p>This is a conceptual React component.</p>\n  //   </div>\n  // );\n  console.log("Conceptual App.js loaded");\n  return "See index.html for a very basic rendering approach.";\n}\n\n// export default App; // In a real setup',
-        language: "javascript",
-      },
-      "package.json": {
-        content:
-          '{\n  "name": "simple-react-app",\n  "version": "0.1.0",\n  "description": "A conceptual simple React app template.",\n  "dependencies": {\n    "react": "conceptual",\n    "react-dom": "conceptual"\n  },\n  "scripts": {\n    "start": "echo \\"Open index.html in your browser\\""\n  }\n}',
-        language: "json",
-      },
-    },
-  };
-
   const handleOptionSelect = (optionId: string) => {
     setSelectedOption(optionId)
     setUploadError(null)
@@ -140,125 +101,12 @@ export default function GetStartedPage() {
     })
   }
 
-  const handleProceed = async () => {
-    if (selectedOption === "template") {
-      setIsProcessingFiles(true); // Use existing state for loading indication
-      setUploadError(null); // Clear previous errors
-
-      try {
-        const selectedTemplate = templates.find(
-          (t) => t.name.toLowerCase().replace(/\s+/g, "-") === projectName,
-        ); // Assuming projectName is set to template id
-
-        if (!selectedTemplate || !projectTemplates[projectName]) {
-          throw new Error(
-            `Template "${projectName}" not found or project name does not match a template ID.`,
-          );
-        }
-
-        const templateFiles = projectTemplates[projectName];
-        if (!templateFiles || Object.keys(templateFiles).length === 0) {
-          throw new Error(`Files for template "${projectName}" are missing or empty.`);
-        }
-
-        // Set a default project name if the user hasn't changed it from the template ID
-        // Or, use the template's display name for the project if no specific project name input is planned for templates
-        // For now, we assume `projectName` state holds the ID and that's fine for `storeProjectData`
-        // A more user-friendly approach would be to have a separate `templateProjectName` state.
-
-        const stored = await storeProjectData(templateFiles);
-        if (!stored) {
-          throw new Error(
-            "Failed to store template project data. Browser storage might be full.",
-          );
-        }
-
-        // Simulate some processing time if needed, or remove timeout for instant redirect
-        setTimeout(() => {
-          router.push("/ide?source=template");
-          setIsProcessingFiles(false);
-        }, 500); // Reduced timeout for templates
-      } catch (error) {
-        setUploadError(
-          error instanceof Error
-            ? error.message
-            : "Failed to create project from template.",
-        );
-        setIsProcessingFiles(false);
-        console.error("Template creation error:", error);
-      }
-    } else {
-      // Simulate project creation/setup for other options (blank)
-      setIsProcessingFiles(true); // Use existing state for loading indication
-      setUploadError(null); // Clear previous errors
-
-      if (selectedOption === "blank") {
-        try {
-          if (!projectName.trim()) {
-            throw new Error("Project name cannot be empty for a blank project.");
-          }
-
-          const blankProjectFiles: Record<string, { content: string; language: string }> = {
-            "index.html": {
-              content: `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${projectName || "New Project"}</title>
-  <style>
-    body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f0f0f0; color: #333; }
-    h1 { font-size: 2em; color: #555; }
-  </style>
-</head>
-<body>
-  <h1>Welcome to '${projectName || "your new project"}'!</h1>
-  ${projectDescription ? `<p>${projectDescription}</p>` : ""}
-</body>
-</html>`,
-              language: "html",
-            },
-            "README.md": {
-              content: `# ${projectName || "New Project"}
-
-${projectDescription || "Start coding!"}
-
-This is a blank project created from the Modern IDE.
-You can start by editing the \`index.html\` file or adding new files and folders.`,
-              language: "markdown",
-            },
-          };
-
-          const stored = await storeProjectData(blankProjectFiles);
-          if (!stored) {
-            throw new Error(
-              "Failed to store blank project data. Browser storage might be full.",
-            );
-          }
-
-          setTimeout(() => {
-            router.push("/ide?source=blank");
-            setIsProcessingFiles(false);
-          }, 500); // Quick redirect for blank projects
-        } catch (error) {
-          setUploadError(
-            error instanceof Error
-              ? error.message
-              : "Failed to create blank project.",
-          );
-          setIsProcessingFiles(false);
-          console.error("Blank project creation error:", error);
-        }
-      } else {
-         // Fallback for any other unhandled selectedOption during proceed
-        console.warn(`Proceed called with unhandled option: ${selectedOption}`);
-        setTimeout(() => {
-          router.push("/ide"); // Default redirect
-          setIsProcessingFiles(false);
-        }, 1000);
-      }
-    }
-  };
+  const handleProceed = () => {
+    // Simulate project creation/setup
+    setTimeout(() => {
+      router.push("/ide")
+    }, 1000)
+  }
 
   // Enhanced compression with better algorithms
   const compressData = (data: string, filename: string): string => {
@@ -800,111 +648,6 @@ You can start by editing the \`index.html\` file or adding new files and folders
     return languageMap[ext || ""] || "typescript"
   }
 
-  const handleCloneRepository = async () => {
-    setIsCloning(true);
-    setCloneError(null);
-
-    try {
-      if (!gitUrl) {
-        throw new Error("Please enter a Git repository URL.");
-      }
-
-      // Parse Git URL (basic implementation for GitHub URLs)
-      const urlParts = gitUrl.match(/github\.com\/([^\/]+)\/([^\/.]+)/);
-      if (!urlParts || urlParts.length < 3) {
-        throw new Error("Invalid GitHub URL format. Expected format: https://github.com/owner/repo");
-      }
-      const owner = urlParts[1];
-      const repo = urlParts[2];
-
-      // Use projectName state if provided, otherwise derive from repo name
-      const currentProjectName = projectName || repo;
-
-      setCloneError(`Cloning ${owner}/${repo} as ${currentProjectName}...`); // Temporary message
-
-      // --- GitHub API fetching logic ---
-      const filesToStore: Record<string, { content: string; language: string }> = {};
-
-      async function fetchContents(path: string) {
-        const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`);
-
-        if (response.status === 403) {
-          // Check for rate limit error
-          const rateLimitReset = response.headers.get('X-RateLimit-Reset');
-          const resetTime = rateLimitReset ? new Date(parseInt(rateLimitReset) * 1000).toLocaleTimeString() : 'unknown';
-          throw new Error(`GitHub API rate limit exceeded. Please try again after ${resetTime}. For larger repositories or frequent use, consider authentication.`);
-        }
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ message: "Unknown error fetching repository contents." }));
-          throw new Error(`Failed to fetch repository contents from ${path}: ${response.status} ${response.statusText}. ${errorData.message}`);
-        }
-
-        const contents = await response.json();
-
-        for (const item of contents) {
-          if (shouldSkipFile(item.path)) { // Use existing shouldSkipFile
-            console.log(`Skipping ${item.path}`);
-            continue;
-          }
-
-          if (item.type === "file") {
-            setCloneError(`Processing file: ${item.path}...`);
-            if (item.download_url) {
-              const fileResponse = await fetch(item.download_url);
-              if (!fileResponse.ok) {
-                 console.warn(`Skipping file ${item.path} due to download error: ${fileResponse.status}`);
-                 continue;
-              }
-              let content = await fileResponse.text(); // Assuming text files for now
-
-              // Content might be Base64 encoded if accessed via item.content, but download_url provides raw content
-              // If item.content was used, it would be:
-              // if (item.encoding === 'base64') {
-              //   content = atob(item.content);
-              // }
-
-              // Compress if it's a text file (using existing helper)
-              if (isTextFile(item.name)) {
-                content = compressData(content, item.name);
-              }
-
-              filesToStore[item.path] = {
-                content: content,
-                language: getLanguageFromPath(item.path),
-              };
-            } else {
-              console.warn(`Skipping file ${item.path} as it has no download_url (possibly a submodule or too large for direct content API)`);
-            }
-          } else if (item.type === "dir") {
-            setCloneError(`Fetching directory: ${item.path}...`);
-            await fetchContents(item.path); // Recursively fetch directory contents
-          }
-        }
-      }
-
-      await fetchContents(""); // Start fetching from the root directory
-
-      if (Object.keys(filesToStore).length === 0) {
-        throw new Error("No files were fetched from the repository. It might be empty or an error occurred.");
-      }
-
-      setCloneError("All files processed. Storing project data...");
-      const stored = await storeProjectData(filesToStore);
-      if (!stored) {
-        throw new Error("Failed to store project data. The project might be too large or browser storage is full.");
-      }
-
-      router.push("/ide?source=git");
-
-    } catch (error) {
-      setCloneError(error instanceof Error ? error.message : "An unknown error occurred during cloning.");
-      console.error("Cloning error:", error);
-    } finally {
-      setIsCloning(false);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -1090,12 +833,6 @@ You can start by editing the \`index.html\` file or adding new files and folders
 
               {selectedOption === "git" && (
                 <div className="space-y-4">
-                  {cloneError && (
-                    <Alert variant="destructive">
-                      <AlertCircle className="h-4 w-4" />
-                      <AlertDescription>{cloneError}</AlertDescription>
-                    </Alert>
-                  )}
                   <div className="space-y-2">
                     <Label htmlFor="git-url">Repository URL</Label>
                     <Input
@@ -1103,7 +840,6 @@ You can start by editing the \`index.html\` file or adding new files and folders
                       placeholder="https://github.com/username/repository.git"
                       value={gitUrl}
                       onChange={(e) => setGitUrl(e.target.value)}
-                      disabled={isCloning}
                     />
                   </div>
                   <div className="space-y-2">
@@ -1113,61 +849,23 @@ You can start by editing the \`index.html\` file or adding new files and folders
                       placeholder="my-awesome-project"
                       value={projectName}
                       onChange={(e) => setProjectName(e.target.value)}
-                      disabled={isCloning}
                     />
                   </div>
-                  <Button
-                    className="w-full"
-                    onClick={handleCloneRepository}
-                    disabled={isCloning}
-                  >
-                    {isCloning ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Cloning Repository...
-                      </>
-                    ) : (
-                      <>
-                        <GitBranch className="mr-2 h-4 w-4" />
-                        Clone Repository
-                      </>
-                    )}
+                  <Button className="w-full" onClick={handleProceed}>
+                    <GitBranch className="mr-2 h-4 w-4" />
+                    Clone Repository
                   </Button>
                 </div>
               )}
 
               {selectedOption === "template" && (
                 <div className="space-y-4">
-                  {uploadError && ( // Re-use uploadError for template errors for now
-                    <Alert variant="destructive">
-                      <AlertCircle className="h-4 w-4" />
-                      <AlertDescription>{uploadError}</AlertDescription>
-                    </Alert>
-                  )}
-                  <div className="space-y-2">
-                    <Label htmlFor="template-project-name">Project Name (from Template)</Label>
-                    <Input
-                      id="template-project-name"
-                      placeholder="e.g., html-css-js"
-                      value={projectName} // This will be pre-filled by clicking a template card
-                      onChange={(e) => setProjectName(e.target.value)}
-                                          // User can still customize, but initial value is template ID
-                      disabled={isProcessingFiles}
-                    />
-                  </div>
-
                   <div className="grid gap-3">
-                    {templates.map((template) => (
+                    {templates.map((template, index) => (
                       <div
-                        key={template.name} // Assuming names are unique, better to add an ID
-                        className={`flex items-center justify-between p-3 border rounded-lg hover:bg-accent/50 cursor-pointer ${
-                          projectName === template.name.toLowerCase().replace(/\s+/g, "-") ? "border-primary ring-1 ring-primary" : "border-border"
-                        }`}
-                        onClick={() => {
-                          // Set project name to a derivable ID from template name
-                          setProjectName(template.name.toLowerCase().replace(/\s+/g, "-"));
-                          setUploadError(null); // Clear error when a new template is selected
-                        }}
+                        key={index}
+                        className="flex items-center justify-between p-3 border border-border rounded-lg hover:bg-accent/50 cursor-pointer"
+                        onClick={() => setProjectName(template.name.toLowerCase().replace(/\s+/g, "-"))}
                       >
                         <div>
                           <p className="font-medium">{template.name}</p>
@@ -1177,18 +875,9 @@ You can start by editing the \`index.html\` file or adding new files and folders
                       </div>
                     ))}
                   </div>
-                  <Button className="w-full" onClick={handleProceed} disabled={isProcessingFiles || !projectName}>
-                    {isProcessingFiles ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Creating Project...
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="mr-2 h-4 w-4" />
-                        Create from Template
-                      </>
-                    )}
+                  <Button className="w-full" onClick={handleProceed}>
+                    <Zap className="mr-2 h-4 w-4" />
+                    Create from Template
                   </Button>
                 </div>
               )}

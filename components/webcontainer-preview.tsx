@@ -36,7 +36,6 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
 
   const webContainerRef = useRef<WebContainer | null>(null);
   const processRef = useRef<any>(null);
-  const prevFilesRef = useRef<Record<string, { content: string; language: string }>>();
 
   const addLog = (msg: string) => {
     const formattedLog = `${new Date().toLocaleTimeString()}: ${msg}`;
@@ -149,9 +148,6 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
       const tree = convertToFileTree(files);
       await wc.mount(tree);
       addLog("📁 Files mounted");
-      // Store files right after mounting for future diffs
-      prevFilesRef.current = JSON.parse(JSON.stringify(files));
-
 
       if (needsInstallation(detected)) {
         updateStatus("installing");
@@ -216,122 +212,16 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
   };
 
   useEffect(() => {
-    const handleFileChanges = async () => {
-      if (Object.keys(files).length === 0) {
-        addLog("ℹ️ No files provided yet. Waiting for files to load preview.");
-        return;
-      }
-
-      const wcInstance = webContainerRef.current;
-      const currentStatus = status; // Capture current status for stable comparison
-
-      if (!wcInstance || currentStatus === "idle" || currentStatus === "error" || !prevFilesRef.current) {
-        addLog(`🔄 Initializing or status is ${currentStatus}. Attempting full preview start...`);
-        await startPreview(); // startPreview will set prevFilesRef on successful mount
-        return;
-      }
-
-      // Container is running (or at least not idle/error and booted), check for file changes
-      if (currentStatus === "booting" || currentStatus === "installing") {
-        addLog(`ℹ️ Preview status is ${currentStatus}. Waiting for it to become 'running' before live updates.`);
-        return;
-      }
-
-      let packageJsonChanged = false;
-      const filesToWrite: Array<{ path: string; content: string }> = [];
-      const currentFilePaths = Object.keys(files);
-      const previousFilePaths = prevFilesRef.current ? Object.keys(prevFilesRef.current) : [];
-
-      // Check for changed or added files
-      for (const filePath of currentFilePaths) {
-        if (!prevFilesRef.current || !prevFilesRef.current[filePath] || files[filePath].content !== prevFilesRef.current[filePath]?.content) {
-          // Check if the file content is actually different from the stored previous version
-          if (files[filePath].content !== prevFilesRef.current[filePath]?.content) {
-             filesToWrite.push({ path: filePath, content: files[filePath].content });
-             addLog(`➕ Detected change/addition: ${filePath}`);
-          } else if (!prevFilesRef.current[filePath]) {
-            // File is new
-            filesToWrite.push({ path: filePath, content: files[filePath].content });
-            addLog(`➕ Detected new file: ${filePath}`);
-          }
-
-          if (filePath.endsWith("package.json")) {
-            packageJsonChanged = true;
-          }
-        }
-      }
-
-      // Check for deleted files
-      const deletedFiles = previousFilePaths.filter(path => !currentFilePaths.includes(path));
-      if (deletedFiles.length > 0) {
-          addLog(`🗑️ Detected ${deletedFiles.length} deleted file(s): ${deletedFiles.join(", ")}. Restarting preview for accuracy.`);
-          await startPreview();
-          return;
-      }
-
-      if (packageJsonChanged) {
-        addLog("📄 package.json changed, restarting preview...");
-        await startPreview();
-      } else if (filesToWrite.length > 0) {
-        addLog(`✍️ Writing ${filesToWrite.length} changed file(s) to container...`);
-        for (const file of filesToWrite) {
-          if (file.content.startsWith('// Binary file:') && !file.path.endsWith('.ico')) {
-              addLog(`Skipping write for placeholder binary file: ${file.path}`);
-              continue;
-          }
-          try {
-            await wcInstance.fs.writeFile(file.path, file.content);
-            addLog(`  - ${file.path} written`);
-          } catch (e: any) {
-            addLog(`❌ Error writing file ${file.path} to WebContainer: ${e.message}`);
-            // Optionally, trigger a full restart if a write fails
-            // await startPreview();
-            // return;
-          }
-        }
-        prevFilesRef.current = JSON.parse(JSON.stringify(files));
-        addLog("✅ Files updated in container. Dev server should handle HMR/reload.");
-      } else {
-          // addLog("ℹ️ No significant file changes detected for live update.");
-      }
-    };
-
-    handleFileChanges();
-
-    // Original cleanup logic (ensure it's appropriate for the new structure)
-    // This cleanup runs when `files` changes or component unmounts.
-    // If `startPreview` is called, it handles its own process killing.
-    // This top-level cleanup might be redundant if `startPreview` is robust.
-    // However, it can serve as a fallback if the component unmounts unexpectedly.
-    return () => {
-      // This cleanup might be too aggressive if `files` causes frequent re-runs
-      // and `startPreview` itself is managing processes.
-      // Consider if `processRef.current?.kill()` is only needed on *unmount*.
-      // For now, keeping it as it implies that a change in `files` that doesn't lead to
-      // `startPreview` (e.g. only live writes) might still want to kill an old process
-      // if some logic error occurred. But ideally, `startPreview` handles this.
-      // if (processRef.current) {
-      //   addLog("🧹 useEffect[files] cleanup: Killing process (if any).");
-      //   processRef.current.kill();
-      //   processRef.current = null;
-      // }
-    };
-  }, [files, status]); // Depend on status to re-evaluate when status changes (e.g. from installing to running)
-
-
-  // Separate useEffect for component unmount cleanup
-  useEffect(() => {
+    if (Object.keys(files).length > 0 && status === "idle") {
+      startPreview();
+    }
     return () => {
       if (processRef.current) {
-        addLog("🧹 Component unmount: Killing process (if any).");
         processRef.current.kill();
         processRef.current = null;
       }
-      // WebContainer instance is managed by a shared promise,
-      // so it's not disposed here. Consider lifecycle if this component
-      // were the sole owner.
-    }
-  }, []);
+    };
+  }, [files]);
 
   return (
     <div className={`h-full flex flex-col bg-background/20 ${isFullscreen ? "fixed inset-0 z-50 bg-black" : ""}`}>

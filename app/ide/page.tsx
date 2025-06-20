@@ -228,7 +228,7 @@ Happy coding! 🚀`,
     const searchParams = new URLSearchParams(window.location.search)
     const source = searchParams.get("source")
 
-    if (source === "upload" || source === "git" || source === "template" || source === "blank") {
+    if (source === "upload") {
       setIsLoadingProject(true)
 
       // Load uploaded project with enhanced retrieval
@@ -453,16 +453,7 @@ Happy coding! 🚀`,
 
           {/* AI Chat */}
           <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
-            <AIChat
-              activeFile={activeFile}
-              files={files}
-              onFileChange={(path, content) => {
-                setFiles((prev) => ({
-                  ...prev,
-                  [path]: { ...prev[path], content },
-                }))
-              }}
-            />
+            <AIChat />
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
