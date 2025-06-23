@@ -69,7 +69,7 @@ export function Preview({ files }: PreviewProps) {
       }
 
       // Extract JSX content (improved regex)
-      const jsxMatch = mainFile.content.match(/return\s*$$\s*([\s\S]*?)\s*$$\s*;?\s*}/s)
+      const jsxMatch = mainFile.content.match(/return\s*\{\s*([\s\S]*?)\s*\}\s*;?\s*}/)
 
       if (jsxMatch) {
         let jsx = jsxMatch[1].trim()

@@ -163,7 +163,7 @@ declare global {
         onMount={handleEditorDidMount}
         loading={
           <div className="h-full w-full flex items-center justify-center bg-background/30">
-            <div className="text-muted-foreground">Loading Monaco Editor...</div>
+            <div className="text-muted-foreground">Just Wait dude! Initalizing Editor For You ❤️ </div>
           </div>
         }
         options={{
@@ -237,9 +237,8 @@ declare global {
           // Performance
           renderValidationDecorations: "on",
           renderControlCharacters: false,
-          renderIndentGuides: true,
-          highlightActiveIndentGuide: true,
-          // Find and replace
+         
+        
           find: {
             addExtraSpaceOnTop: false,
             autoFindInSelection: "never",
@@ -252,9 +251,7 @@ declare global {
             sticky: true,
           },
           // Lightbulb (code actions)
-          lightbulb: {
-            enabled: "on",
-          },
+        
           // Code lens
           codeLens: true,
           // Bracket pair colorization

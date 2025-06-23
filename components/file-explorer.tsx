@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import * as ReactDOM from "react-dom/client"
 import {
   ChevronDown,
   ChevronRight,
@@ -82,6 +83,60 @@ export function FileExplorer({
     if (parentPath) {
       setExpandedFolders((prev) => new Set([...prev, parentPath]))
     }
+  }
+
+  const handleContextMenu = (e: React.MouseEvent, path: string, isFolder: boolean) => {
+    e.preventDefault()
+    
+    const menu = (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <div className="w-full h-full absolute top-0 left-0"></div>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent className="w-48">
+          <DropdownMenuItem onClick={() => startCreating("file", isFolder ? path : path.split('/').slice(0, -1).join('/'))}>
+            <File className="mr-2 h-4 w-4" />
+            New File
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => startCreating("folder", isFolder ? path : path.split('/').slice(0, -1).join('/'))}>
+            <FolderPlus className="mr-2 h-4 w-4" />
+            New Folder
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => startRename(path)}>
+            <Edit2 className="mr-2 h-4 w-4" />
+            Rename
+          </DropdownMenuItem>
+          <DropdownMenuItem 
+            className="text-red-600" 
+            onClick={() => isFolder ? setDeletingFolder(path) : onFileDelete(path)}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+    
+    // Show context menu at cursor position
+    const { clientX: x, clientY: y } = e
+    const contextMenu = document.createElement('div')
+    contextMenu.style.position = 'absolute'
+    contextMenu.style.left = `${x}px`
+    contextMenu.style.top = `${y}px`
+    contextMenu.style.zIndex = '9999'
+    document.body.appendChild(contextMenu)
+    
+    // Render menu and remove after selection
+    const root = ReactDOM.createRoot(contextMenu)
+    root.render(menu)
+    
+    const removeMenu = () => {
+      root.unmount()
+      document.body.removeChild(contextMenu)
+      document.removeEventListener('click', removeMenu)
+    }
+    
+    document.addEventListener('click', removeMenu)
   }
 
   const createFile = () => {
