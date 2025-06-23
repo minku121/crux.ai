@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Send, Loader2, FileDown } from 'lucide-react';
+import { Send, Loader2, FileDown, Folder, File as FileIcon } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 
@@ -11,6 +11,7 @@ type Message = {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  originalContent?: string; // Store the original response for file generation
   timestamp: Date;
 };
 
@@ -73,7 +74,8 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
         const assistantMessage: Message = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: data.result,
+          content: formatAIResponse(data.result),
+          originalContent: data.result,
           timestamp: new Date(),
         };
 
@@ -96,6 +98,66 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
     }
   };
 
+  // Parse AI response to extract folder and file structure
+  const parseAIResponse = (response: string) => {
+    const folderRegex = /<Folder fname="([^"]+)">/g;
+    const fileRegex = /<File filename="([^"]+)"/g;
+    
+    const folders: string[] = [];
+    const files: string[] = [];
+    
+    // Extract folders
+    let folderMatch;
+    while ((folderMatch = folderRegex.exec(response))) {
+      folders.push(folderMatch[1]);
+    }
+    
+    // Extract files
+    let fileMatch;
+    while ((fileMatch = fileRegex.exec(response))) {
+      files.push(fileMatch[1]);
+    }
+    
+    return { folders, files };
+  };
+
+  // Format the AI response to show a simplified structure
+  const formatAIResponse = (content: string) => {
+    // Check if the content contains folder/file structure
+    if (content.includes('<Folder') || content.includes('<File')) {
+      const { folders, files } = parseAIResponse(content);
+      
+      let formattedResponse = '';
+      
+      // Add explanation
+      formattedResponse += 'I can create the following project structure for you:\n\n';
+      
+      // Add folders
+      if (folders.length > 0) {
+        formattedResponse += 'Folders:\n';
+        folders.forEach(folder => {
+          formattedResponse += `- ${folder}\n`;
+        });
+        formattedResponse += '\n';
+      }
+      
+      // Add files
+      if (files.length > 0) {
+        formattedResponse += 'Files:\n';
+        files.forEach(file => {
+          formattedResponse += `- ${file}\n`;
+        });
+      }
+      
+      formattedResponse += '\nClick "Generate Files" to create these files and folders.';
+      
+      return formattedResponse;
+    }
+    
+    // If no folder/file structure, return the original content
+    return content;
+  };
+
   const handleGenerateFiles = (messageId: string) => {
     if (generatedFiles.has(messageId)) return;
     
@@ -103,8 +165,8 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
     const message = messages.find(m => m.id === messageId);
     if (!message || message.role !== 'assistant') return;
     
-    // Call the callback with the message content
-    onGenerateFiles(message.content);
+    // Call the callback with the original content if available, otherwise use the displayed content
+    onGenerateFiles(message.originalContent || message.content);
     
     // Mark this message as having generated files
     setGeneratedFiles(prev => new Set([...prev, messageId]));
@@ -133,7 +195,29 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
                     : 'bg-muted'
                 )}
               >
-                <div className="whitespace-pre-wrap break-words">{message.content}</div>
+                <div className="whitespace-pre-wrap break-words">
+                  {message.role === 'assistant' && message.content.includes('Folders:') ? (
+                    <div className="space-y-2">
+                      {message.content.split('\n').map((line, index) => {
+                        if (line.startsWith('- ') && message.content.includes('Folders:') && message.content.includes('Files:')) {
+                          const isFolder = index < message.content.indexOf('Files:') / 2;
+                          return (
+                            <div key={index} className="flex items-center gap-1">
+                              {isFolder ? 
+                                <Folder className="h-3 w-3 text-blue-500" /> : 
+                                <FileIcon className="h-3 w-3 text-green-500" />
+                              }
+                              <span>{line.substring(2)}</span>
+                            </div>
+                          );
+                        }
+                        return <div key={index}>{line}</div>;
+                      })}
+                    </div>
+                  ) : (
+                    message.content
+                  )}
+                </div>
                 <div className="mt-2 text-xs opacity-70 flex justify-between items-center">
                   <span>
                     {message.timestamp.toLocaleTimeString([], {

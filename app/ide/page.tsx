@@ -174,8 +174,26 @@ export default function GenerateProject() {
   };
 
   const handleFolderCreate = (path: string) => {
-    // Folders are virtual in this implementation
-    // They exist implicitly through file paths
+    // Create a placeholder file to make the folder exist
+    // This ensures the folder appears in the file explorer
+    setFiles(prev => {
+      // Check if folder already exists implicitly through file paths
+      const folderExists = Object.keys(prev).some(filePath => 
+        filePath.startsWith(`${path}/`) || filePath === path
+      );
+      
+      if (folderExists) {
+        return prev; // Folder already exists
+      }
+      
+      return {
+        ...prev,
+        [`${path}/.folder`]: {
+          content: '// This is a placeholder file to represent a folder',
+          language: 'plaintext'
+        }
+      };
+    });
   };
 
   const handleFolderDelete = (path: string) => {

@@ -302,10 +302,16 @@ export function FileExplorer({
   }
 
   const fileTree = Object.keys(files).reduce((acc, path) => {
+    // Process .folder placeholder files to create folder structure but don't show them as files
+    const isPlaceholder = path.endsWith('/.folder');
+    
     const parts = path.split("/")
     let current = acc
 
-    for (let i = 0; i < parts.length - 1; i++) {
+    // For placeholder files, we want to create the folder structure but not add the .folder file itself
+    const processDepth = parts.length - 1;
+    
+    for (let i = 0; i < processDepth; i++) {
       const part = parts[i]
       if (!current[part]) {
         current[part] = {}
@@ -313,7 +319,11 @@ export function FileExplorer({
       current = current[part]
     }
 
-    current[parts[parts.length - 1]] = null
+    // Only add the actual file to the tree if it's not a placeholder
+    if (!isPlaceholder) {
+      current[parts[parts.length - 1]] = null
+    }
+    
     return acc
   }, {} as any)
 
@@ -322,7 +332,7 @@ export function FileExplorer({
     const result: JSX.Element[] = []
 
     entries.forEach(([name, children]) => {
-      // Skip .folder placeholder files
+      // Skip .folder placeholder files but keep processing
       if (name === ".folder") return
 
       const fullPath = path ? `${path}/${name}` : name
