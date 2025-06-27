@@ -1,0 +1,43 @@
+name: Next.js CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📦 Checkout code
+        uses: actions/checkout@v3
+
+      - name: 🧰 Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: 📥 Install dependencies
+        run: npm install
+
+      - name: ⚙️ Build project
+        run: npm run build
+
+      - name: ✅ Lint code
+        run: npm run lint
+
+      - name: 🎉 Post-build success message
+        run: echo "✅ Build and Lint successful!"
+
+      # Optional: Upload build output as artifact (e.g., for inspection)
+      #- name: 📦 Upload build artifact
+       # uses: actions/upload-artifact@v3
+       # with:
+       #   name: nextjs-build
+       #   path: .next
+
+      # Optional: Deploy to Vercel (if configured)
+      # - name: 🚀 Deploy to Vercel
+      #   run: npx vercel --prod --token=${{ secrets.VERCEL_TOKEN }}
