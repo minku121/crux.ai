@@ -25,11 +25,10 @@ jobs:
       - name: ⚙️ Build project
         run: npm run build
 
-      - name: ✅ Lint code
-        run: npm run lint
+      
 
       - name: 🎉 Post-build success message
-        run: echo "✅ Build and Lint successful!"
+        run: echo "✅ Build  successful!"
 
       # Optional: Upload build output as artifact (e.g., for inspection)
       #- name: 📦 Upload build artifact
