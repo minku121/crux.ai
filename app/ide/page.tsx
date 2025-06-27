@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { FileExplorer } from '@/components/file-explorer';
 import { CodeEditor } from '@/components/code-editor';
 import { Button } from '@/components/ui/button';
@@ -9,11 +9,8 @@ import { AIChat } from '@/components/ai-chat';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
-// Parser function to extract files/folders
-const parseAIResponse = (response: string) => {
-  const folderRegex = /<Folder fname="([^"]+)">([\s\S]*?)<\/Folder>/g;
-  const fileRegex = /<File filename="([^"]+)" content="([\s\S]*?)" ?\/?>/g;
 
+const parseAIResponse = (response: string) => {
   const decode = (html: string) =>
     html
       .replace(/&lt;/g, '<')
@@ -21,195 +18,74 @@ const parseAIResponse = (response: string) => {
       .replace(/&quot;/g, '"')
       .replace(/&amp;/g, '&');
 
-  const folders: any[] = [];
-  const files: any[] = [];
+  const extractContentInsideViteApp = (xml: string): string => {
+    const match = xml.match(/<ViteReactApp[^>]*>([\s\S]*?)<\/ViteReactApp>/);
+    if (!match) {
+      console.warn('[parseAIResponse] Missing <ViteReactApp> tag in response');
+      return xml;
+    }
+    return match[1];
+  };
 
-  // Parse folders
-  let match;
-  while ((match = folderRegex.exec(response))) {
-    const folderName = match[1];
-    const content = match[2];
-    const children: any[] = [];
+  const parseDirectory = (content: string, parentPath = ''): any[] => {
+    const result: any[] = [];
 
-    let fileMatch;
-    while ((fileMatch = fileRegex.exec(content))) {
-      children.push({
-        type: 'file',
-        name: fileMatch[1],
-        content: decode(fileMatch[2]),
+    const directoryRegex = /<DirectoryBlock name="([^"]+)"[^>]*>([\s\S]*?)<\/DirectoryBlock>/g;
+    let dirMatch;
+    while ((dirMatch = directoryRegex.exec(content))) {
+      const folderName = dirMatch[1];
+      const folderContent = dirMatch[2];
+      const children = parseDirectory(folderContent, parentPath ? `${parentPath}/${folderName}` : folderName);
+
+      result.push({
+        type: 'folder',
+        name: folderName,
+        children
       });
     }
 
-    folders.push({
-      type: 'folder',
-      name: folderName,
-      children,
-    });
-  }
+    const codeBlockRegex = /<CodeBlock name="([^"]+)" language="([^"]+)"[^>]*><!\[CDATA\[([\s\S]*?)\]\]><\/CodeBlock>/g;
+    let codeMatch;
+    while ((codeMatch = codeBlockRegex.exec(content))) {
+      const filename = codeMatch[1];
+      const language = codeMatch[2];
+      const fileContent = decode(codeMatch[3]);
 
-  // Top-level files
-  let fileMatch;
-  while ((fileMatch = fileRegex.exec(response))) {
-    files.push({
-      type: 'file',
-      name: fileMatch[1],
-      content: decode(fileMatch[2]),
-    });
-  }
+      console.log(`[parseAIResponse] Parsed file: ${filename}, language: ${language}`);
+      result.push({
+        type: 'file',
+        name: filename,
+        content: fileContent,
+        language
+      });
+    }
 
-  return [...folders, ...files];
+    return result;
+  };
+
+  const inner = extractContentInsideViteApp(response);
+  const parsed = parseDirectory(inner);
+  console.log('[parseAIResponse] Final parsed structure:', parsed);
+  return parsed;
 };
 
 export default function GenerateProject() {
   const [loading, setLoading] = useState(false);
-  const [prompt, setPrompt] = useState<string>('');
   const [files, setFiles] = useState<Record<string, { content: string; language: string }>>({});
   const [activeFile, setActiveFile] = useState<string | null>(null);
 
-  const handleGenerate = async () => {
-    if (!prompt.trim()) {
-      alert('Please enter a prompt');
+  const handleGenerateFromAI = (responseFiles: Record<string, { content: string; language: string }>) => {
+    console.log('[handleGenerateFromAI] Received files:', responseFiles);
+    if (!responseFiles || Object.keys(responseFiles).length === 0) {
+      console.warn('[handleGenerateFromAI] No files generated from AI');
       return;
     }
-    
-    setLoading(true);
-    try {
-      const res = await fetch('/api/assistant', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: prompt,
-        }),
-      });
 
-      const data = await res.json();
-
-      if (data.result) {
-        const parsed = parseAIResponse(data.result);
-        
-        // Convert the parsed array to the format expected by FileExplorer and CodeEditor
-        const fileMap: Record<string, { content: string; language: string }> = {};
-        
-        // Process folders and files
-        const processItems = (items: any[], parentPath = '') => {
-          items.forEach(item => {
-            if (item.type === 'file') {
-              const path = parentPath ? `${parentPath}/${item.name}` : item.name;
-              fileMap[path] = {
-                content: item.content,
-                language: getLanguageFromFile(item.name)
-              };
-            } else if (item.type === 'folder' && item.children) {
-              const folderPath = parentPath ? `${parentPath}/${item.name}` : item.name;
-              processItems(item.children, folderPath);
-            }
-          });
-        };
-        
-        processItems(parsed);
-        setFiles(fileMap);
-
-        // Select first file to show in editor
-        const firstFilePath = Object.keys(fileMap)[0];
-        if (firstFilePath) setActiveFile(firstFilePath);
-      } else {
-        alert('No result received');
-      }
-    } catch (err: any) {
-      console.error(err);
-      alert('Error: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleFileSelect = (path: string) => {
-    setActiveFile(path);
-  };
-
-  const handleFileChange = (path: string, content: string) => {
-    setFiles(prev => ({
-      ...prev,
-      [path]: {
-        ...prev[path],
-        content
-      }
-    }));
-  };
-
-  const handleFileCreate = (path: string, content: string) => {
-    setFiles(prev => ({
-      ...prev,
-      [path]: {
-        content,
-        language: getLanguageFromFile(path)
-      }
-    }));
-  };
-
-  const handleFileDelete = (path: string) => {
-    setFiles(prev => {
-      const newFiles = { ...prev };
-      delete newFiles[path];
-      return newFiles;
-    });
-    
-    if (activeFile === path) {
-      const remainingFiles = Object.keys(files);
-      setActiveFile(remainingFiles.length > 0 ? remainingFiles[0] : null);
-    }
-  };
-
-  const handleFileRename = (oldPath: string, newPath: string) => {
-    setFiles(prev => {
-      const newFiles = { ...prev };
-      newFiles[newPath] = newFiles[oldPath];
-      delete newFiles[oldPath];
-      return newFiles;
-    });
-    
-    if (activeFile === oldPath) {
-      setActiveFile(newPath);
-    }
-  };
-
-  const handleFolderCreate = (path: string) => {
-    // Create a placeholder file to make the folder exist
-    // This ensures the folder appears in the file explorer
-    setFiles(prev => {
-      // Check if folder already exists implicitly through file paths
-      const folderExists = Object.keys(prev).some(filePath => 
-        filePath.startsWith(`${path}/`) || filePath === path
-      );
-      
-      if (folderExists) {
-        return prev; // Folder already exists
-      }
-      
-      return {
-        ...prev,
-        [`${path}/.folder`]: {
-          content: '// This is a placeholder file to represent a folder',
-          language: 'plaintext'
-        }
-      };
-    });
-  };
-
-  const handleFolderDelete = (path: string) => {
-    setFiles(prev => {
-      const newFiles = { ...prev };
-      Object.keys(newFiles).forEach(filePath => {
-        if (filePath.startsWith(path + '/')) {
-          delete newFiles[filePath];
-        }
-      });
-      return newFiles;
-    });
-    
-    if (activeFile && activeFile.startsWith(path + '/')) {
-      const remainingFiles = Object.keys(files);
-      setActiveFile(remainingFiles.length > 0 ? remainingFiles[0] : null);
+    setFiles(responseFiles);
+    const first = Object.keys(responseFiles)[0];
+    if (first) {
+      console.log(`[handleGenerateFromAI] Setting active file: ${first}`);
+      setActiveFile(first);
     }
   };
 
@@ -221,94 +97,106 @@ export default function GenerateProject() {
 
     try {
       const zip = new JSZip();
-      
-      // Add all files to the zip
+
       Object.entries(files).forEach(([path, { content }]) => {
-        // Create folders if needed
         const pathParts = path.split('/');
-        const fileName = pathParts.pop();
+        const fileName = pathParts.pop()!;
         const folderPath = pathParts.join('/');
-        
+        let folder = zip;
+
         if (folderPath) {
-          // Add file to its folder
-          let folder = zip;
-          const folders = folderPath.split('/');
-          
-          folders.forEach(f => {
-            folder = folder.folder(f) || folder;
+          folderPath.split('/').forEach(p => {
+            folder = folder.folder(p) || folder;
           });
-          
-          folder.file(fileName as string, content);
-        } else {
-          // Add file to root
-          zip.file(path, content);
         }
+
+        folder.file(fileName, content);
       });
-      
-      // Generate the zip file
+
       const zipContent = await zip.generateAsync({ type: 'blob' });
-      
-      // Download the zip file
       saveAs(zipContent, 'project-files.zip');
-    } catch (error) {
-      console.error('Error creating zip file:', error);
-      alert('Error creating zip file');
+    } catch (err) {
+      console.error('Zip error:', err);
+      alert('Error creating zip');
     }
   };
 
-  const handleGenerateFromAI = (content: string) => {
-    try {
-      const parsed = parseAIResponse(content);
-      
-      // Convert the parsed array to the format expected by FileExplorer and CodeEditor
-      const fileMap: Record<string, { content: string; language: string }> = {};
-      
-      // Process folders and files
-      const processItems = (items: any[], parentPath = '') => {
-        items.forEach(item => {
-          if (item.type === 'file') {
-            const path = parentPath ? `${parentPath}/${item.name}` : item.name;
-            fileMap[path] = {
-              content: item.content,
-              language: getLanguageFromFile(item.name)
-            };
-          } else if (item.type === 'folder' && item.children) {
-            const folderPath = parentPath ? `${parentPath}/${item.name}` : item.name;
-            processItems(item.children, folderPath);
-          }
-        });
-      };
-      
-      processItems(parsed);
-      setFiles(fileMap);
+  const handleFileSelect = (path: string) => setActiveFile(path);
+  const handleFileChange = (path: string, content: string) => {
+    setFiles(prev => ({
+      ...prev,
+      [path]: { ...prev[path], content }
+    }));
+  };
+  const handleFileCreate = (path: string, content: string) => {
+    setFiles(prev => ({
+      ...prev,
+      [path]: { content, language: getLanguageFromFile(path) }
+    }));
+  };
+  const handleFileDelete = (path: string) => {
+    setFiles(prev => {
+      const newFiles = { ...prev };
+      delete newFiles[path];
+      return newFiles;
+    });
 
-      // Select first file to show in editor
-      const firstFilePath = Object.keys(fileMap)[0];
-      if (firstFilePath) setActiveFile(firstFilePath);
-    } catch (err: any) {
-      console.error(err);
-      alert('Error parsing AI response: ' + err.message);
+    if (activeFile === path) {
+      const remaining = Object.keys(files);
+      setActiveFile(remaining.length > 0 ? remaining[0] : null);
+    }
+  };
+  const handleFileRename = (oldPath: string, newPath: string) => {
+    setFiles(prev => {
+      const newFiles = { ...prev };
+      newFiles[newPath] = newFiles[oldPath];
+      delete newFiles[oldPath];
+      return newFiles;
+    });
+
+    if (activeFile === oldPath) {
+      setActiveFile(newPath);
+    }
+  };
+  const handleFolderCreate = (path: string) => {
+    const folderExists = Object.keys(files).some(file => file.startsWith(`${path}/`));
+    if (!folderExists) {
+      setFiles(prev => ({
+        ...prev,
+        [`${path}/.folder`]: {
+          content: '// folder placeholder',
+          language: 'plaintext'
+        }
+      }));
+    }
+  };
+  const handleFolderDelete = (path: string) => {
+    setFiles(prev => {
+      const newFiles = { ...prev };
+      for (const key of Object.keys(newFiles)) {
+        if (key.startsWith(`${path}/`)) delete newFiles[key];
+      }
+      return newFiles;
+    });
+
+    if (activeFile?.startsWith(`${path}/`)) {
+      const remaining = Object.keys(files);
+      setActiveFile(remaining.length > 0 ? remaining[0] : null);
     }
   };
 
   return (
-   <div className="flex flex-col h-screen">
-      {/* Header with download button */}
+    <div className="flex flex-col h-screen">
+      {/* Header */}
       <div className="p-4 border-b flex justify-end">
-        <Button
-          onClick={handleDownloadZip}
-          disabled={Object.keys(files).length === 0}
-          variant="outline"
-          title="Download all files as ZIP"
-        >
+        <Button onClick={handleDownloadZip} disabled={!Object.keys(files).length} variant="outline">
           <Download className="h-4 w-4 mr-2" />
           Download
         </Button>
       </div>
-      
-      {/* Main content */}
+
+      {/* Body */}
       <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
-        {/* File Explorer */}
         <ResizablePanel defaultSize={20} minSize={15} maxSize={30}>
           <FileExplorer
             files={files}
@@ -321,10 +209,7 @@ export default function GenerateProject() {
             onFolderDelete={handleFolderDelete}
           />
         </ResizablePanel>
-        
         <ResizableHandle withHandle />
-        
-        {/* Code Editor */}
         <ResizablePanel defaultSize={55}>
           <CodeEditor
             files={files}
@@ -332,10 +217,7 @@ export default function GenerateProject() {
             onFileChange={handleFileChange}
           />
         </ResizablePanel>
-        
         <ResizableHandle withHandle />
-        
-        {/* AI Chat */}
         <ResizablePanel defaultSize={25} minSize={20}>
           <AIChat onGenerateFiles={handleGenerateFromAI} />
         </ResizablePanel>
@@ -343,7 +225,6 @@ export default function GenerateProject() {
     </div>
   );
 }
-
 
 function getLanguageFromFile(filename: string): string {
   if (filename.endsWith('.tsx')) return 'typescript';

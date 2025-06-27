@@ -1,23 +1,85 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, FormEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Send, Loader2, FileDown, Folder, File as FileIcon } from 'lucide-react';
+import { Send, Loader2, FileDown, Folder, File as FileIcon, Info, StickyNote } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 
-type Message = {
+interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  originalContent?: string; // Store the original response for file generation
   timestamp: Date;
-};
+}
 
 interface AIChatProps {
-  onGenerateFiles: (content: string) => void;
+  onGenerateFiles: (files: Record<string, { content: string; language: string }>) => void;
 }
+
+const parseXmlWithRegex = (xml: string): { path: string; content: string }[] => {
+  const cleanXml = xml.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_, c) => c.trim());
+
+  const files: { path: string; content: string }[] = [];
+  const dirStack: string[] = [];
+
+  const lines = cleanXml
+    .split(/(?=<\/?DirectoryBlock)|(?=<(?:CodeBlock|ConfigBlock|DocBlock))/g)
+    .map(l => l.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    const dirOpen = line.match(/^<DirectoryBlock[^>]*name="([^"]+)"[^>]*>/);
+    if (dirOpen) {
+      dirStack.push(dirOpen[1]);
+      continue;
+    }
+
+    const dirClose = line.match(/^<\/DirectoryBlock>/);
+    if (dirClose) {
+      dirStack.pop();
+      continue;
+    }
+
+    const fileMatch = line.match(/<(CodeBlock|ConfigBlock|DocBlock)[^>]*name="([^"]+)"[^>]*>([\s\S]*?)<\/\1>/);
+    if (fileMatch) {
+      const [, , name, content] = fileMatch;
+      const fullPath = [...dirStack, name].join('/');
+      files.push({ path: fullPath, content: content.trim() });
+    }
+  }
+
+  // ⛳ Add `.gitkeep` for any folder not included in files
+  const declaredFolders = new Set<string>();
+  let tempStack: string[] = [];
+
+  for (const line of lines) {
+    const folderMatch = line.match(/^<DirectoryBlock[^>]*name="([^"]+)"[^>]*>/);
+    if (folderMatch) {
+      tempStack.push(folderMatch[1]);
+      const path = tempStack.join('/');
+      declaredFolders.add(path);
+    } else if (line.match(/^<\/DirectoryBlock>/)) {
+      tempStack.pop();
+    }
+  }
+
+  const fileFolderSet = new Set(
+    files.map(f => f.path.split('/').slice(0, -1).join('/'))
+  );
+
+  for (const folderPath of declaredFolders) {
+    if (!fileFolderSet.has(folderPath)) {
+      files.push({ path: `${folderPath}/.gitkeep`, content: '' });
+    }
+  }
+
+  return files;
+};
+
+
+
 
 export function AIChat({ onGenerateFiles }: AIChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -27,24 +89,16 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Scroll to bottom when messages change
   useEffect(() => {
-    if (scrollAreaRef.current) {
-      const scrollContainer = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
-      if (scrollContainer) {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
-      }
-    }
+    const el = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  // Focus input on mount
   useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
+    inputRef.current?.focus();
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!input.trim() || loading) return;
 
@@ -55,7 +109,7 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    setMessages(prev => [...prev, userMessage]);
     setInput('');
     setLoading(true);
 
@@ -63,112 +117,69 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
       const res = await fetch('/api/assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: input,
-        }),
+        body: JSON.stringify({ prompt: input })
       });
 
       const data = await res.json();
+      console.log('[1] AI API response:', data.result);
 
       if (data.result) {
         const assistantMessage: Message = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: formatAIResponse(data.result),
-          originalContent: data.result,
-          timestamp: new Date(),
+          content: data.result,
+          timestamp: new Date()
         };
 
-        setMessages((prev) => [...prev, assistantMessage]);
+        setMessages(prev => [...prev, assistantMessage]);
       } else {
         throw new Error('No result received');
       }
-    } catch (err: any) {
-      console.error(err);
-      const errorMessage: Message = {
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err.message : 'Something went wrong';
+      setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `Error: ${err.message || 'Something went wrong'}`,
-        timestamp: new Date(),
-      };
-
-      setMessages((prev) => [...prev, errorMessage]);
+        content: `Error: ${error}`,
+        timestamp: new Date()
+      }]);
     } finally {
       setLoading(false);
     }
   };
 
-  // Parse AI response to extract folder and file structure
-  const parseAIResponse = (response: string) => {
-    const folderRegex = /<Folder fname="([^"]+)">/g;
-    const fileRegex = /<File filename="([^"]+)"/g;
-    
-    const folders: string[] = [];
-    const files: string[] = [];
-    
-    // Extract folders
-    let folderMatch;
-    while ((folderMatch = folderRegex.exec(response))) {
-      folders.push(folderMatch[1]);
-    }
-    
-    // Extract files
-    let fileMatch;
-    while ((fileMatch = fileRegex.exec(response))) {
-      files.push(fileMatch[1]);
-    }
-    
-    return { folders, files };
-  };
-
-  // Format the AI response to show a simplified structure
-  const formatAIResponse = (content: string) => {
-    // Check if the content contains folder/file structure
-    if (content.includes('<Folder') || content.includes('<File')) {
-      const { folders, files } = parseAIResponse(content);
-      
-      let formattedResponse = '';
-      
-      // Add explanation
-      formattedResponse += 'I can create the following project structure for you:\n\n';
-      
-      // Add folders
-      if (folders.length > 0) {
-        formattedResponse += 'Folders:\n';
-        folders.forEach(folder => {
-          formattedResponse += `- ${folder}\n`;
-        });
-        formattedResponse += '\n';
-      }
-      
-      // Add files
-      if (files.length > 0) {
-        formattedResponse += 'Files:\n';
-        files.forEach(file => {
-          formattedResponse += `- ${file}\n`;
-        });
-      }
-      
-      formattedResponse += '\nClick "Generate Files" to create these files and folders.';
-      
-      return formattedResponse;
-    }
-    
-    // If no folder/file structure, return the original content
-    return content;
-  };
-
   const handleGenerateFiles = (messageId: string) => {
     if (generatedFiles.has(messageId)) return;
-    
-    // Find the message
-    const message = messages.find(m => m.id === messageId);
+
+    const message = messages.find((m) => m.id === messageId);
     if (!message || message.role !== 'assistant') return;
-    
-    // Call the callback with the original content if available, otherwise use the displayed content
-    onGenerateFiles(message.originalContent || message.content);
-    
-    // Mark this message as having generated files
+
+    const files = parseXmlWithRegex(message.content);
+    console.log('[2] Parsed files:', files);
+
+    if (files.length === 0) {
+      console.warn('[3] No files parsed.');
+      onGenerateFiles({});
+      return;
+    }
+
+    const extMap: Record<string, string> = {
+      tsx: 'tsx', ts: 'typescript', js: 'javascript', jsx: 'jsx',
+      json: 'json', html: 'html', css: 'css', md: 'markdown',
+      env: 'env', txt: 'text',
+    };
+
+    const result: Record<string, { content: string; language: string }> = {};
+    for (const { path, content } of files) {
+      const ext = path.split('.').pop() || 'txt';
+      result[path] = {
+        content,
+        language: extMap[ext] || 'text',
+      };
+    }
+
+    console.log('[4] Final files:', result);
+    onGenerateFiles(result);
     setGeneratedFiles(prev => new Set([...prev, messageId]));
   };
 
@@ -177,7 +188,7 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
       <div className="p-3 border-b">
         <h3 className="text-lg font-semibold">AI Assistant</h3>
       </div>
-      
+
       <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
         <div className="space-y-4">
           {messages.length === 0 ? (
@@ -195,37 +206,14 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
                     : 'bg-muted'
                 )}
               >
-                <div className="whitespace-pre-wrap break-words">
-                  {message.role === 'assistant' && message.content.includes('Folders:') ? (
-                    <div className="space-y-2">
-                      {message.content.split('\n').map((line, index) => {
-                        if (line.startsWith('- ') && message.content.includes('Folders:') && message.content.includes('Files:')) {
-                          const isFolder = index < message.content.indexOf('Files:') / 2;
-                          return (
-                            <div key={index} className="flex items-center gap-1">
-                              {isFolder ? 
-                                <Folder className="h-3 w-3 text-blue-500" /> : 
-                                <FileIcon className="h-3 w-3 text-green-500" />
-                              }
-                              <span>{line.substring(2)}</span>
-                            </div>
-                          );
-                        }
-                        return <div key={index}>{line}</div>;
-                      })}
-                    </div>
-                  ) : (
-                    message.content
-                  )}
+                <div className="whitespace-pre-wrap break-words space-y-1">
+                  {message.content}
                 </div>
+
                 <div className="mt-2 text-xs opacity-70 flex justify-between items-center">
                   <span>
-                    {message.timestamp.toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
+                    {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
-                  
                   {message.role === 'assistant' && (
                     <Button
                       variant="ghost"
@@ -242,6 +230,7 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
               </div>
             ))
           )}
+
           {loading && (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -249,7 +238,7 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
           )}
         </div>
       </ScrollArea>
-      
+
       <form onSubmit={handleSubmit} className="p-3 border-t">
         <div className="flex gap-2">
           <Input
