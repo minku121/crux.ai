@@ -9,30 +9,35 @@ import { getSystemPrompt } from '@/prompts/system-prompt';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 export async function POST(req: NextRequest) {
   try {
-    const { prompt } = await req.json(); 
+    const { prompt, history } = await req.json(); 
     
     
-    const combinedPrompt = [
-      BASE_PROMPT,
-      reactBasePrompt,
-      getSystemPrompt("/home/project"),
-      prompt
-    ].join('\n\n');
-
     const model = genAI.getGenerativeModel({ 
       model: "gemini-2.0-flash-lite", 
     });
 
+    // Format the incoming history for the Gemini API
+    // Format the incoming history for the Gemini API
+    const formattedHistory = history.map((msg: any) => ({
+      role: msg.role === 'user' ? 'user' : 'model',
+      parts: [{ text: msg.content }],
+    }));
+
+    // Prepend system prompts to the history
+    const initialPrompts = [
+      { role: 'user', parts: [{ text: BASE_PROMPT }] },
+      { role: 'user', parts: [{ text: reactBasePrompt }] },
+      { role: 'user', parts: [{ text: getSystemPrompt("/home/project") }] },
+    ];
+
+    const fullHistory = [...initialPrompts, ...formattedHistory];
+
     const chat = model.startChat({
-      history: [
-        {
-          role: "user",
-          parts: [{ text: combinedPrompt }],
-        },
-      ],
+      history: fullHistory,
     });
 
-    let result = await chat.sendMessage(combinedPrompt);
+    // Send the current prompt as the last message in the chat
+    let result = await chat.sendMessage(prompt);
     let response = await result.response;
     let text = await response.text();
     let fullText = text;

@@ -19,6 +19,7 @@ let webContainerPromise: Promise<WebContainer> | null = null;
 
 interface WebContainerPreviewProps {
   files: Record<string, { content: string; language: string }>;
+  shellCommands?: string[][];
   onStatusChange?: (status: "idle" | "booting" | "installing" | "running" | "error") => void;
   onLogsChange?: (logs: string[]) => void;
 }
@@ -26,9 +27,10 @@ interface WebContainerPreviewProps {
 type AppType = "next" | "vite" | "html" | null;
 type PreviewStatus = "idle" | "booting" | "installing" | "running" | "error";
 
-export function WebContainerPreview({ files, onStatusChange, onLogsChange }: WebContainerPreviewProps) {
+export function WebContainerPreview({ files, shellCommands: propShellCommands, onStatusChange, onLogsChange }: WebContainerPreviewProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<PreviewStatus>("idle");
+  const [isUpdatingFiles, setIsUpdatingFiles] = useState(false);
   const [appType, setAppType] = useState<AppType>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -204,17 +206,20 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
       await wc.mount(tree);
       addLog("📁 Files mounted");
 
-      // Extract shell commands from AI response
-      const shellCommands = extractShellCommands(mergedFiles);
-      if (shellCommands.length === 0) throw new Error("No shell command found in AI response to run the app.");
-      addLog(`🟢 Extracted shell commands:`);
-      shellCommands.forEach(cmdArr => addLog(`$ ${cmdArr.join(' ')}`));
-      console.log('Extracted shell commands:', shellCommands);
+      // Use propShellCommands if provided, otherwise extract from AI response
+      const commandsToExecute = propShellCommands && propShellCommands.length > 0 
+        ? propShellCommands
+        : extractShellCommands(mergedFiles);
+
+      if (commandsToExecute.length === 0) throw new Error("No shell command found to run the app.");
+      addLog(`🟢 Commands to execute:`);
+      commandsToExecute.forEach(cmdArr => addLog(`$ ${cmdArr.join(' ')}`));
+      console.log('Commands to execute:', commandsToExecute);
 
       updateStatus("installing");
       // Run all but the last shell command (assume last is the dev server)
-      for (let i = 0; i < shellCommands.length - 1; i++) {
-        const cmd = shellCommands[i];
+      for (let i = 0; i < commandsToExecute.length - 1; i++) {
+        const cmd = commandsToExecute[i];
         addLog(`🔧 Running: ${cmd.join(' ')}`);
         
         try {
@@ -274,7 +279,7 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
 
       updateStatus("running");
       // Run the last shell command as the dev server
-      const devCmd = shellCommands[shellCommands.length - 1];
+      const devCmd = commandsToExecute[commandsToExecute.length - 1];
       addLog(`🚀 Starting dev server: ${devCmd.join(' ')}`);
       processRef.current = await wc.spawn(devCmd[0], devCmd.slice(1), {
         env: { NODE_ENV: "development" },
@@ -297,17 +302,120 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
     }
   };
 
-  useEffect(() => {
-    if (Object.keys(mergedFiles).length > 0 && status === "idle") {
-      startPreview();
+  // Track if files have been mounted initially
+  const [initialMountDone, setInitialMountDone] = useState(false);
+  // Track previous files to detect changes
+  const prevFilesRef = useRef(mergedFiles);
+
+  // Handle file updates without restarting the container
+  const updateMountedFiles = async () => {
+    if (!webContainerRef.current || status === "idle" || status === "error") return;
+    
+    setIsUpdatingFiles(true);
+    
+    try {
+      // Find changed or new files
+      const currentFiles = mergedFiles;
+      const prevFiles = prevFilesRef.current;
+      const changedFiles = {};
+      let dependencyChanged = false;
+      
+      // Identify changed or new files
+      Object.entries(currentFiles).forEach(([path, { content }]) => {
+        if (!prevFiles[path] || prevFiles[path].content !== content) {
+          (changedFiles as Record<string, string>)[path] = content;
+          
+          // Check if package.json was modified
+          if (path.endsWith('package.json')) {
+            try {
+              const prevPkg = prevFiles[path] ? JSON.parse(prevFiles[path].content) : {};
+              const currentPkg = JSON.parse(content as string);
+              
+              // Compare dependencies and devDependencies
+              const prevDeps = { ...prevPkg.dependencies, ...prevPkg.devDependencies };
+              const currentDeps = { ...currentPkg.dependencies, ...currentPkg.devDependencies };
+              
+              // Check if dependencies were added, removed, or versions changed
+              const allDepKeys = new Set([...Object.keys(prevDeps), ...Object.keys(currentDeps)]);
+              
+              for (const key of allDepKeys) {
+                if (prevDeps[key] !== currentDeps[key]) {
+                  dependencyChanged = true;
+                  addLog(`📦 Dependency change detected: ${key}`);
+                  break;
+                }
+              }
+            } catch (err:any) {
+              addLog(`⚠️ Error parsing package.json: ${err.message}`);
+            }
+          }
+        }
+      });
+      
+      if (Object.keys(changedFiles).length === 0) return;
+      
+      addLog(`🔄 Updating ${Object.keys(changedFiles).length} changed files...`);
+      
+      // Update files in the container
+      for (const [path, content] of Object.entries(changedFiles)) {
+        try {
+          // Skip binary files
+          if (typeof content === 'string' && content.startsWith('// Binary file:')) {
+            addLog(`⏩ Skipping binary file update: ${path}`);
+            continue;
+          }
+          
+          // Create directory structure if needed
+          const dirPath = path.split('/').slice(0, -1).join('/');
+          if (dirPath) {
+            await webContainerRef.current.fs.mkdir(dirPath, { recursive: true });
+          }
+          
+          // Write the file
+          await webContainerRef.current.fs.writeFile(path, content as string);
+          addLog(`✅ Updated file: ${path}`);
+        } catch (err:any) {
+          addLog(`❌ Failed to update file ${path}: ${err.message}`);
+        }
+      }
+      
+      // Store current files as previous for next comparison
+      prevFilesRef.current = currentFiles;
+      
+      // If dependencies changed, restart the preview
+      if (dependencyChanged) {
+        addLog(`🔄 Dependencies changed. Restarting preview...`);
+        startPreview();
+      } else if (url) {
+        // If the server is already running and no dependency changes, we don't need to restart it
+        addLog(`🔄 Files updated. Refresh the preview if needed.`);
+      }
+    } catch (err:any) {
+      addLog(`❌ Error updating files: ${err.message}`);
+    } finally {
+      setIsUpdatingFiles(false);
     }
+  };
+
+  useEffect(() => {
+    // Initial mount and boot
+    if (Object.keys(mergedFiles).length > 0 && status === "idle" && !initialMountDone) {
+      startPreview();
+      setInitialMountDone(true);
+    } 
+    // Update files without restarting if already mounted
+    else if (initialMountDone && webContainerRef.current) {
+      updateMountedFiles();
+    }
+    
     return () => {
-      if (processRef.current) {
+      // Only kill the process on component unmount, not on file changes
+      if (processRef.current && !initialMountDone) {
         processRef.current.kill();
         processRef.current = null;
       }
     };
-  }, [mergedFiles]);
+  }, [mergedFiles, propShellCommands, status, initialMountDone]);
 
   return (
     <div className={`h-full flex flex-col bg-background/20 ${isFullscreen ? "fixed inset-0 z-50 bg-black" : ""}`}>
@@ -321,8 +429,15 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
           <Button variant="ghost" size="sm" onClick={() => setIsFullscreen((prev) => !prev)}>
             <Maximize2 className="w-4 h-4" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={startPreview}>
-            <RefreshCw className="w-4 h-4" />
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => initialMountDone ? updateMountedFiles() : startPreview()}
+            title={initialMountDone ? "Update files without restarting" : "Start preview"}
+            disabled={isUpdatingFiles}
+          >
+            <RefreshCw className={`w-4 h-4 ${isUpdatingFiles ? 'animate-spin' : ''}`} />
+            <span className="sr-only">{initialMountDone ? "Update Files" : "Start Preview"}</span>
           </Button>
         </div>
       </div>

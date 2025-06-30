@@ -11,12 +11,14 @@ import { basePrompt as reactBasePrompt } from '@/prompts/react';
 interface Message {
   id: string;
   role: 'user' | 'assistant';
-  content: string;
+  content: string; // summary for display
+  rawContent?: string; // full AI response for file generation
   timestamp: Date;
 }
 
 interface AIChatProps {
   onGenerateFiles: (files: Record<string, { content: string; language: string }>) => void;
+  onShellCommands?: (commands: string[]) => void;
 }
 
 // Improved parser for <boltArtifact> and <boltAction> XML structure
@@ -53,7 +55,7 @@ const parseBoltArtifact = (xml: string): { path: string; content: string }[] => 
     shellCommands += command.trim() + '\n';
   }
   
-  // Also try to extract shell commands from code blocks marked as shell or bash
+  
   const codeBlockRegex = /```(shell|bash|sh)\n([\s\S]*?)```/g;
   let codeMatch;
   while ((codeMatch = codeBlockRegex.exec(raw)) !== null) {
@@ -82,6 +84,19 @@ function mergeFiles(
   ai: Record<string, { content: string; language: string }>
 ): Record<string, { content: string; language: string }> {
   return { ...starter, ...ai };
+}
+
+// Helper to format parsed files and shell commands into a summary string
+function formatParsedSummary(files: { path: string; content: string }[]) {
+  if (!files.length) return "No files or commands found.";
+  const fileLines = files
+    .filter(f => f.path !== "__shell__.sh")
+    .map(f => `${f.path} created`);
+  const shell = files.find(f => f.path === "__shell__.sh");
+  const shellLines = shell && shell.content
+    ? ["Shell commands:", ...shell.content.split('\n').map(cmd => `  $ ${cmd}`)]
+    : [];
+  return [...fileLines, ...shellLines].join('\n');
 }
 
 export function AIChat({ onGenerateFiles }: AIChatProps) {
@@ -121,15 +136,28 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
       const res = await fetch('/api/assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: input })
+        body: JSON.stringify({
+          prompt: input,
+          history: messages.map(msg => ({ role: msg.role, content: msg.content })) // Send full history
+        })
       });
 
       const data = await res.json();
-      // Show the raw JSON response from the backend
+      let summary = "";
+      let rawContent = data.response || data.text || "";
+      try {
+        // Try to parse and summarize
+        const files = parseBoltArtifact(rawContent);
+        summary = formatParsedSummary(files);
+        if (!summary.trim()) summary = JSON.stringify(data, null, 2);
+      } catch {
+        summary = JSON.stringify(data, null, 2);
+      }
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: JSON.stringify(data, null, 2),
+        content: summary,
+        rawContent, // store the real response here
         timestamp: new Date()
       };
       setMessages(prev => [...prev, assistantMessage]);
@@ -153,7 +181,7 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
     if (!message || message.role !== 'assistant') return;
 
     // Use the new parser for boltArtifact XML
-    const files = parseBoltArtifact(message.content);
+    const files = parseBoltArtifact(message.rawContent || message.content);
     console.log('[2] Parsed files:', files);
 
     if (files.length === 0) {
@@ -190,7 +218,7 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
     if (generatedFiles.has(lastMsg.id)) return;
 
     // Parse AI response files
-    const aiFiles = parseBoltArtifact(lastMsg.content);
+    const aiFiles = parseBoltArtifact(lastMsg.rawContent || lastMsg.content);
     if (aiFiles.length === 0) return;
     const extMap: Record<string, string> = {
       tsx: 'tsx', ts: 'typescript', js: 'javascript', jsx: 'jsx',
@@ -206,7 +234,7 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
       };
     }
 
-    // Parse starter files from reactBasePrompt at response time
+    
     const starterFilesArr = parseBoltArtifact(reactBasePrompt);
     const starterResult: Record<string, { content: string; language: string }> = {};
     for (const { path, content } of starterFilesArr) {
