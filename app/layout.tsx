@@ -8,9 +8,10 @@ import { Toaster } from "@/components/ui/toaster"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Modern IDE - Code Anywhere, Build Everything",
+  title: "Crux.ai - Code Anywhere, Build Everything",
   description: "A powerful, browser-based IDE with advanced features, AI assistance, and beautiful themes.",
-    generator: 'v0.dev'
+  creator: "Minku Singh",
+  authors: [{ name: "Minku Singh" }]
 }
 
 export default function RootLayout({

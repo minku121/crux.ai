@@ -4,7 +4,8 @@ import React, { useState } from 'react';
 import { FileExplorer } from '@/components/file-explorer';
 import { CodeEditor } from '@/components/code-editor';
 import { Button } from '@/components/ui/button';
-import { Download } from 'lucide-react';
+import { Download, Code2 } from 'lucide-react';
+import { ThemeToggle } from '@/components/theme-toggle';
 import { AIChat } from '@/components/ai-chat';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -20,10 +21,7 @@ const parseAIResponse = (response: string) => {
 
   const extractContentInsideViteApp = (xml: string): string => {
     const match = xml.match(/<ViteReactApp[^>]*>([\s\S]*?)<\/ViteReactApp>/);
-    if (!match) {
-      console.warn('[parseAIResponse] Missing <ViteReactApp> tag in response');
-      return xml;
-    }
+    if (!match) return xml;
     return match[1];
   };
 
@@ -51,7 +49,6 @@ const parseAIResponse = (response: string) => {
       const language = codeMatch[2];
       const fileContent = decode(codeMatch[3]);
 
-      console.log(`[parseAIResponse] Parsed file: ${filename}, language: ${language}`);
       result.push({
         type: 'file',
         name: filename,
@@ -65,7 +62,7 @@ const parseAIResponse = (response: string) => {
 
   const inner = extractContentInsideViteApp(response);
   const parsed = parseDirectory(inner);
-  console.log('[parseAIResponse] Final parsed structure:', parsed);
+
   return parsed;
 };
 
@@ -75,7 +72,6 @@ export default function GenerateProject() {
   const [activeFile, setActiveFile] = useState<string | null>(null);
 
   const handleGenerateFromAI = (responseFiles: Record<string, { content: string; language: string }>) => {
-    console.log('[handleGenerateFromAI] Received files:', responseFiles);
     if (!responseFiles || Object.keys(responseFiles).length === 0) {
       console.warn('[handleGenerateFromAI] No files generated from AI');
       return;
@@ -84,7 +80,6 @@ export default function GenerateProject() {
     setFiles(responseFiles);
     const first = Object.keys(responseFiles)[0];
     if (first) {
-      console.log(`[handleGenerateFromAI] Setting active file: ${first}`);
       setActiveFile(first);
     }
   };
@@ -188,11 +183,20 @@ export default function GenerateProject() {
   return (
     <div className="flex flex-col h-screen">
       {/* Header */}
-      <div className="p-4 border-b flex justify-end">
-        <Button onClick={handleDownloadZip} disabled={!Object.keys(files).length} variant="outline">
-          <Download className="h-4 w-4 mr-2" />
-          Download
-        </Button>
+      <div className="p-4 border-b flex justify-between items-center">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
+            <Code2 className="h-4 w-4 text-primary-foreground" />
+          </div>
+          <span className="font-semibold">Crux.ai</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <Button onClick={handleDownloadZip} disabled={!Object.keys(files).length} variant="outline">
+            <Download className="h-4 w-4 mr-2" />
+            Download
+          </Button>
+        </div>
       </div>
 
       {/* Body */}

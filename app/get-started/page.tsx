@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-
+import {motion} from 'framer-motion'
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -657,7 +657,7 @@ export default function GetStartedPage() {
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
               <Code2 className="h-5 w-5 text-primary-foreground" />
             </div>
-            <span className="text-xl font-bold">Modern IDE</span>
+            <span className="text-xl font-bold">Crux.ai</span>
           </div>
 
           <div className="flex items-center gap-3">

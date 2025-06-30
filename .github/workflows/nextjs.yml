@@ -25,18 +25,8 @@ jobs:
       - name: ⚙️ Build project
         run: npm run build
 
-      
+      - name: 🧹 Lint Project
+        run: npm run lint
 
       - name: 🎉 Post-build success message
-        run: echo "✅ Build  successful!"
-
-      # Optional: Upload build output as artifact (e.g., for inspection)
-      #- name: 📦 Upload build artifact
-       # uses: actions/upload-artifact@v3
-       # with:
-       #   name: nextjs-build
-       #   path: .next
-
-      # Optional: Deploy to Vercel (if configured)
-      # - name: 🚀 Deploy to Vercel
-      #   run: npx vercel --prod --token=${{ secrets.VERCEL_TOKEN }}
+        run: echo "✅ Build successful!"

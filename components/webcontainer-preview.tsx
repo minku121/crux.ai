@@ -44,7 +44,7 @@ export function WebContainerPreview({ files, shellCommands: propShellCommands, o
     const updatedLogs = [...logs.slice(-99), formattedLog];
     setLogs(updatedLogs);
     onLogsChange?.(updatedLogs);
-    console.log(msg);
+  
   };
 
   const updateStatus = (newStatus: PreviewStatus) => {

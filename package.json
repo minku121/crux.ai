@@ -6,7 +6,12 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "next lint",
-    "start": "next start"
+    "start": "next start",
+    "docker:build": "docker build -t crux-ai .",
+    "docker:start": "docker run -p 3000:3000 -d --name crux-ai-container crux-ai",
+    "docker:stop": "docker stop crux-ai-container && docker rm crux-ai-container",
+    "docker:compose:up": "docker-compose up -d --build",
+    "docker:compose:down": "docker-compose down"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -50,6 +55,7 @@
     "embla-carousel-react": "8.5.1",
     "fast-xml-parser": "^5.2.5",
     "file-saver": "^2.0.5",
+    "framer-motion": "^12.20.1",
     "input-otp": "1.4.1",
     "jszip": "^3.10.1",
     "lucide-react": "^0.454.0",

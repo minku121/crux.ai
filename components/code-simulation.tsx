@@ -767,7 +767,7 @@ export function CodeSimulation() {
             <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
             <div className="w-3 h-3 rounded-full bg-green-500"></div>
             <span className="ml-4 text-sm text-muted-foreground">
-              Modern IDE - {currentStep_data?.filename || "App.jsx"}
+              Crux.ai - {currentStep_data?.filename || "App.jsx"}
             </span>
           </div>
           <div className="flex items-center gap-3">

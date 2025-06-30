@@ -182,7 +182,7 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
 
     // Use the new parser for boltArtifact XML
     const files = parseBoltArtifact(message.rawContent || message.content);
-    console.log('[2] Parsed files:', files);
+   
 
     if (files.length === 0) {
       console.warn('[3] No files parsed.');
@@ -205,7 +205,7 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
       };
     }
 
-    console.log('[4] Final files:', result);
+    
     onGenerateFiles(result);
     setGeneratedFiles(prev => new Set([...prev, messageId]));
   };
