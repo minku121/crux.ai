@@ -94,19 +94,61 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
   // Helper to extract shell commands from AI response (boltAction type="shell")
   function extractShellCommands(files: Record<string, { content: string; language: string }>): string[][] {
     const shellCommands: string[][] = [];
+    
+    // Process shell command files
     Object.entries(files).forEach(([path, { content, language }]) => {
       // Accept any file path, but only if language is 'shell' or path is '__shell__' or ends with '.sh'
       if (language === 'shell' || path.startsWith('__shell__') || path.endsWith('.sh')) {
+        // Split content by lines and process each line
         content.split('\n').forEach(line => {
           const trimmed = line.trim();
+          // Skip empty lines and comments
           if (trimmed && !trimmed.startsWith('#')) {
-            // Split by spaces, but handle quoted args
-            const cmd = trimmed.match(/(?:[^"\s]+|"[^"]*")+/g) || [];
-            shellCommands.push(cmd.map(s => s.replace(/(^\"|\"$)/g, '')));
+            try {
+              // Improved regex to handle quoted arguments with both single and double quotes
+              // This handles: normal args, "double quoted args", and 'single quoted args'
+              const cmdRegex = /(?:[^\s'"]+|"[^"]*"|'[^']*')+/g;
+              const matches = trimmed.match(cmdRegex) || [];
+              
+              // Process each argument to remove quotes properly
+              const processedArgs = matches.map(arg => {
+                // Remove surrounding quotes (both single and double)
+                if ((arg.startsWith('"') && arg.endsWith('"')) || 
+                    (arg.startsWith('\'') && arg.endsWith('\'')))
+                  return arg.slice(1, -1);
+                return arg;
+              });
+              
+              // Only add non-empty commands
+              if (processedArgs.length > 0) {
+                shellCommands.push(processedArgs);
+              }
+            } catch (e) {
+              // If parsing fails, try a simpler approach as fallback
+              console.warn('Command parsing error, using fallback:', e);
+              const simpleSplit = trimmed.split(/\s+/);
+              shellCommands.push(simpleSplit);
+            }
           }
         });
       }
     });
+    
+    // Add default npm install if no commands were found but package.json exists
+    if (shellCommands.length === 0 && Object.keys(files).some(path => path.endsWith('package.json'))) {
+      addLog('📦 No shell commands found but package.json exists. Adding default npm install.');
+      shellCommands.push(['npm', 'install', '--no-fund', '--no-audit', '--loglevel=error']);
+      shellCommands.push(['npm', 'run', 'dev']);
+    }
+    
+    // Log the extracted commands for debugging
+    if (shellCommands.length > 0) {
+      addLog(`📋 Extracted ${shellCommands.length} shell commands:`);
+      shellCommands.forEach(cmd => addLog(`  $ ${cmd.join(' ')}`));
+    } else {
+      addLog('⚠️ No shell commands extracted from AI response');
+    }
+    
     return shellCommands;
   }
 
@@ -174,11 +216,60 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
       for (let i = 0; i < shellCommands.length - 1; i++) {
         const cmd = shellCommands[i];
         addLog(`🔧 Running: ${cmd.join(' ')}`);
-        const proc = await wc.spawn(cmd[0], cmd.slice(1));
-        proc.output.pipeTo(new WritableStream({ write: (data) => addLog(`📦 ${data}`) }));
-        const code = await proc.exit;
-        if (code !== 0) throw new Error(`${cmd.join(' ')} failed with code ${code}`);
-        addLog(`✅ ${cmd.join(' ')} finished`);
+        
+        try {
+          // Special handling for npm install commands
+          if (cmd[0] === 'npm' && (cmd[1] === 'install' || cmd[1] === 'i')) {
+            // Add a more reliable flag for npm install
+            const npmArgs = [...cmd.slice(1)];
+            // Replace --yes with --no-fund --no-audit --loglevel=error for more reliable installs
+            const hasYesFlag = npmArgs.includes('--yes') || npmArgs.includes('-y');
+            if (hasYesFlag) {
+              npmArgs.splice(npmArgs.indexOf(hasYesFlag ? '--yes' : '-y'), 1);
+              if (!npmArgs.includes('--no-fund')) npmArgs.push('--no-fund');
+              if (!npmArgs.includes('--no-audit')) npmArgs.push('--no-audit');
+              if (!npmArgs.includes('--loglevel=error')) npmArgs.push('--loglevel=error');
+            }
+            
+            addLog(`📦 Modified npm command: npm ${npmArgs.join(' ')}`);
+            const proc = await wc.spawn('npm', npmArgs);
+            proc.output.pipeTo(new WritableStream({ write: (data) => addLog(`📦 ${data}`) }));
+            const code = await proc.exit;
+            if (code !== 0) {
+              addLog(`⚠️ npm install failed. Trying with additional flags...`);
+              // Try again with more conservative flags
+              const retryProc = await wc.spawn('npm', ['install', '--no-fund', '--no-audit', '--loglevel=error']);
+              retryProc.output.pipeTo(new WritableStream({ write: (data) => addLog(`📦 ${data}`) }));
+              const retryCode = await retryProc.exit;
+              if (retryCode !== 0) {
+                throw new Error(`npm install failed with code ${retryCode}. Try using a simpler package.json or check for compatibility issues.`);
+              }
+              addLog(`✅ npm install succeeded with fallback options`);
+            } else {
+              addLog(`✅ ${cmd.join(' ')} finished`);
+            }
+          } else {
+            // Standard command execution for non-npm-install commands
+            const proc = await wc.spawn(cmd[0], cmd.slice(1));
+            proc.output.pipeTo(new WritableStream({ write: (data) => addLog(`📦 ${data}`) }));
+            const code = await proc.exit;
+            if (code !== 0) throw new Error(`${cmd.join(' ')} failed with code ${code}`);
+            addLog(`✅ ${cmd.join(' ')} finished`);
+          }
+        } catch (cmdError) {
+          // Provide more helpful error messages for common issues
+          let errorMsg = cmdError instanceof Error ? cmdError.message : String(cmdError);
+          
+          if (cmd[0] === 'npm') {
+            errorMsg += '\n\nPossible solutions:\n';
+            errorMsg += '- Try using a simpler package.json with fewer dependencies\n';
+            errorMsg += '- Check for package version compatibility issues\n';
+            errorMsg += '- WebContainer has limited resources, consider reducing the project size\n';
+            errorMsg += '- Some npm packages may not be compatible with the WebContainer environment';
+          }
+          
+          throw new Error(errorMsg);
+        }
       }
 
       updateStatus("running");

@@ -53,9 +53,24 @@ const parseBoltArtifact = (xml: string): { path: string; content: string }[] => 
     shellCommands += command.trim() + '\n';
   }
   
+  // Also try to extract shell commands from code blocks marked as shell or bash
+  const codeBlockRegex = /```(shell|bash|sh)\n([\s\S]*?)```/g;
+  let codeMatch;
+  while ((codeMatch = codeBlockRegex.exec(raw)) !== null) {
+    const [, , code] = codeMatch;
+    shellCommands += code.trim() + '\n';
+  }
+  
   // If shell commands were found, add them as a special file
   if (shellCommands.trim()) {
-    files.push({ path: '__shell__.sh', content: shellCommands.trim() });
+    // Clean up the shell commands - remove comments and empty lines
+    const cleanedCommands = shellCommands
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith('#'))
+      .join('\n');
+    
+    files.push({ path: '__shell__.sh', content: cleanedCommands });
   }
   
   return files;
