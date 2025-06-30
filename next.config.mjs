@@ -40,8 +40,9 @@ const nextConfig = {
   },
   // For older Next.js versions or additional compatibility
   experimental: {
-    serverComponentsExternalPackages: ['@webcontainer/api'],
-  }
+    // serverComponentsExternalPackages: ['@webcontainer/api'], // Removed as per deprecation warning
+  },
+  serverExternalPackages: ['@webcontainer/api'],
 }
 
 export default nextConfig

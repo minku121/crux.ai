@@ -91,18 +91,31 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
     }
   };
 
-  const getDevCommand = (type: AppType, port?: string): string[] => {
-    switch (type) {
-      case "next":
-        return ["npm", "run", "dev", "--", "-p", port || "3000"];
-      case "vite":
-        return ["npm", "run", "dev"];
-      case "html":
-        return ["npx", "serve", ".", "-p", port || "3001", "--listen", "0.0.0.0"];
-      default:
-        return ["npm", "run", "dev"];
-    }
-  };
+  // Helper to extract shell commands from AI response (boltAction type="shell")
+  function extractShellCommands(files: Record<string, { content: string; language: string }>): string[][] {
+    const shellCommands: string[][] = [];
+    Object.entries(files).forEach(([path, { content, language }]) => {
+      // Accept any file path, but only if language is 'shell' or path is '__shell__' or ends with '.sh'
+      if (language === 'shell' || path.startsWith('__shell__') || path.endsWith('.sh')) {
+        content.split('\n').forEach(line => {
+          const trimmed = line.trim();
+          if (trimmed && !trimmed.startsWith('#')) {
+            // Split by spaces, but handle quoted args
+            const cmd = trimmed.match(/(?:[^"\s]+|"[^"]*")+/g) || [];
+            shellCommands.push(cmd.map(s => s.replace(/(^\"|\"$)/g, '')));
+          }
+        });
+      }
+    });
+    return shellCommands;
+  }
+
+  // Merge starter files and AI files
+  const [mergedFiles, setMergedFiles] = useState(files);
+  useEffect(() => {
+    // Merge logic: AI files override starter files, but keep all unique files
+    setMergedFiles(prev => ({ ...prev, ...files }));
+  }, [files]);
 
   const needsInstallation = (type: AppType): boolean => type !== "html";
 
@@ -139,69 +152,51 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
       }
 
       const wc = webContainerRef.current;
-      const detected = detectAppType(files);
+      const detected = detectAppType(mergedFiles);
       setAppType(detected);
       addLog(`🔍 Detected app type: ${detected || "unknown"}`);
 
       if (!detected) throw new Error("Unsupported app type. Only Next.js, Vite, or HTML supported.");
 
-      const tree = convertToFileTree(files);
+      const tree = convertToFileTree(mergedFiles);
       await wc.mount(tree);
       addLog("📁 Files mounted");
 
-      if (needsInstallation(detected)) {
-        updateStatus("installing");
-        addLog("📦 Installing dependencies...");
-        const install = await wc.spawn("npm", ["install"]);
-        install.output.pipeTo(new WritableStream({ write: (data) => addLog(`📦 ${data}`) }));
-        const code = await install.exit;
-        if (code !== 0) throw new Error(`npm install failed with code ${code}`);
-        addLog("✅ Dependencies installed");
+      // Extract shell commands from AI response
+      const shellCommands = extractShellCommands(mergedFiles);
+      if (shellCommands.length === 0) throw new Error("No shell command found in AI response to run the app.");
+      addLog(`🟢 Extracted shell commands:`);
+      shellCommands.forEach(cmdArr => addLog(`$ ${cmdArr.join(' ')}`));
+      console.log('Extracted shell commands:', shellCommands);
+
+      updateStatus("installing");
+      // Run all but the last shell command (assume last is the dev server)
+      for (let i = 0; i < shellCommands.length - 1; i++) {
+        const cmd = shellCommands[i];
+        addLog(`🔧 Running: ${cmd.join(' ')}`);
+        const proc = await wc.spawn(cmd[0], cmd.slice(1));
+        proc.output.pipeTo(new WritableStream({ write: (data) => addLog(`📦 ${data}`) }));
+        const code = await proc.exit;
+        if (code !== 0) throw new Error(`${cmd.join(' ')} failed with code ${code}`);
+        addLog(`✅ ${cmd.join(' ')} finished`);
       }
 
       updateStatus("running");
-
-      let attempt = 0;
-      const maxAttempts = 5;
-      let success = false;
-
-      while (!success && attempt < maxAttempts) {
-        const randomPort = `${3000 + Math.floor(Math.random() * 1000)}`;
-        const cmd = getDevCommand(detected, randomPort);
-        addLog(`🚀 Attempt ${attempt + 1}: Running dev server on port ${randomPort} with ${cmd.join(" ")}`);
-
-        try {
-          processRef.current = await wc.spawn(cmd[0], cmd.slice(1), {
-            env: { NODE_ENV: "development", PORT: randomPort },
-          });
-
-          processRef.current.output.pipeTo(
-            new WritableStream({ write: (data) => addLog(`📄 ${data}`) })
-          );
-
-          wc.on("server-ready", (port, serverUrl) => {
-            const finalUrl = serverUrl.startsWith("http") ? serverUrl : `http://${serverUrl}`;
-            setUrl(finalUrl);
-            addLog(`✅ Server ready on ${finalUrl}`);
-            success = true;
-          });
-
-          await processRef.current.exit.then((code: number) => {
-            if (code !== 0 && !success) {
-              addLog(`❌ Server exited with code ${code}`);
-              attempt++;
-            }
-          });
-
-          if (!success) throw new Error("Port conflict or server failed");
-
-        } catch (err:any) {
-          addLog(`⚠️ Retrying with new port due to error: ${err.message}`);
-          attempt++;
-        }
-      }
-
-      if (!success) throw new Error("Unable to start server after multiple attempts");
+      // Run the last shell command as the dev server
+      const devCmd = shellCommands[shellCommands.length - 1];
+      addLog(`🚀 Starting dev server: ${devCmd.join(' ')}`);
+      processRef.current = await wc.spawn(devCmd[0], devCmd.slice(1), {
+        env: { NODE_ENV: "development" },
+      });
+      processRef.current.output.pipeTo(
+        new WritableStream({ write: (data) => addLog(`📄 ${data}`) })
+      );
+      wc.on("server-ready", (port, serverUrl) => {
+        const finalUrl = serverUrl.startsWith("http") ? serverUrl : `http://${serverUrl}`;
+        setUrl(finalUrl);
+        addLog(`✅ Server ready on ${finalUrl}`);
+      });
+      await processRef.current.exit;
 
     } catch (err: any) {
       const msg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
@@ -212,7 +207,7 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
   };
 
   useEffect(() => {
-    if (Object.keys(files).length > 0 && status === "idle") {
+    if (Object.keys(mergedFiles).length > 0 && status === "idle") {
       startPreview();
     }
     return () => {
@@ -221,7 +216,7 @@ export function WebContainerPreview({ files, onStatusChange, onLogsChange }: Web
         processRef.current = null;
       }
     };
-  }, [files]);
+  }, [mergedFiles]);
 
   return (
     <div className={`h-full flex flex-col bg-background/20 ${isFullscreen ? "fixed inset-0 z-50 bg-black" : ""}`}>

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Send, Loader2, FileDown, Folder, File as FileIcon, Info, StickyNote } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import { basePrompt as reactBasePrompt } from '@/prompts/react';
 
 interface Message {
   id: string;
@@ -18,74 +19,62 @@ interface AIChatProps {
   onGenerateFiles: (files: Record<string, { content: string; language: string }>) => void;
 }
 
-const parseXmlWithRegex = (xml: string): { path: string; content: string }[] => {
-  const cleanXml = xml.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_, c) => c.trim());
+// Improved parser for <boltArtifact> and <boltAction> XML structure
+const parseBoltArtifact = (xml: string): { path: string; content: string }[] => {
+  // Extract the 'text' property if the response is a JSON object
+  let raw = xml;
+  try {
+    const parsed = JSON.parse(xml);
+    if (parsed && typeof parsed.text === 'string') {
+      raw = parsed.text;
+    }
+  } catch (e) {
+    // Not JSON, treat as raw string
+  }
 
+  // Remove code block markers and trim
+  const cleaned = raw.replace(/^```[a-zA-Z]*\n?|```$/g, '').trim();
+
+  // Extract all <boltAction type="file" filePath="...">...</boltAction> blocks
+  const fileRegex = /<boltAction[^>]*type="file"[^>]*filePath="([^"]+)"[^>]*>([\s\S]*?)<\/boltAction>/g;
   const files: { path: string; content: string }[] = [];
-  const dirStack: string[] = [];
-
-  const lines = cleanXml
-    .split(/(?=<\/?DirectoryBlock)|(?=<(?:CodeBlock|ConfigBlock|DocBlock))/g)
-    .map(l => l.trim())
-    .filter(Boolean);
-
-  for (const line of lines) {
-    const dirOpen = line.match(/^<DirectoryBlock[^>]*name="([^"]+)"[^>]*>/);
-    if (dirOpen) {
-      dirStack.push(dirOpen[1]);
-      continue;
-    }
-
-    const dirClose = line.match(/^<\/DirectoryBlock>/);
-    if (dirClose) {
-      dirStack.pop();
-      continue;
-    }
-
-    const fileMatch = line.match(/<(CodeBlock|ConfigBlock|DocBlock)[^>]*name="([^"]+)"[^>]*>([\s\S]*?)<\/\1>/);
-    if (fileMatch) {
-      const [, , name, content] = fileMatch;
-      const fullPath = [...dirStack, name].join('/');
-      files.push({ path: fullPath, content: content.trim() });
-    }
+  let match;
+  while ((match = fileRegex.exec(cleaned)) !== null) {
+    const [, path, content] = match;
+    files.push({ path: path.trim(), content: content.trim() });
   }
-
-  // ⛳ Add `.gitkeep` for any folder not included in files
-  const declaredFolders = new Set<string>();
-  let tempStack: string[] = [];
-
-  for (const line of lines) {
-    const folderMatch = line.match(/^<DirectoryBlock[^>]*name="([^"]+)"[^>]*>/);
-    if (folderMatch) {
-      tempStack.push(folderMatch[1]);
-      const path = tempStack.join('/');
-      declaredFolders.add(path);
-    } else if (line.match(/^<\/DirectoryBlock>/)) {
-      tempStack.pop();
-    }
+  
+  // Extract all <boltAction type="shell">...</boltAction> blocks
+  const shellRegex = /<boltAction[^>]*type="shell"[^>]*>([\s\S]*?)<\/boltAction>/g;
+  let shellMatch;
+  let shellCommands = '';
+  while ((shellMatch = shellRegex.exec(cleaned)) !== null) {
+    const [, command] = shellMatch;
+    shellCommands += command.trim() + '\n';
   }
-
-  const fileFolderSet = new Set(
-    files.map(f => f.path.split('/').slice(0, -1).join('/'))
-  );
-
-  for (const folderPath of declaredFolders) {
-    if (!fileFolderSet.has(folderPath)) {
-      files.push({ path: `${folderPath}/.gitkeep`, content: '' });
-    }
+  
+  // If shell commands were found, add them as a special file
+  if (shellCommands.trim()) {
+    files.push({ path: '__shell__.sh', content: shellCommands.trim() });
   }
-
+  
   return files;
 };
 
-
-
+// Helper to merge two file maps (AI files override starter files, but all unique files are kept)
+function mergeFiles(
+  starter: Record<string, { content: string; language: string }>,
+  ai: Record<string, { content: string; language: string }>
+): Record<string, { content: string; language: string }> {
+  return { ...starter, ...ai };
+}
 
 export function AIChat({ onGenerateFiles }: AIChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [generatedFiles, setGeneratedFiles] = useState<Set<string>>(new Set());
+  const [starterFiles, setStarterFiles] = useState<Record<string, { content: string; language: string }>>({});
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -121,20 +110,14 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
       });
 
       const data = await res.json();
-      console.log('[1] AI API response:', data.result);
-
-      if (data.result) {
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: data.result,
-          timestamp: new Date()
-        };
-
-        setMessages(prev => [...prev, assistantMessage]);
-      } else {
-        throw new Error('No result received');
-      }
+      // Show the raw JSON response from the backend
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: JSON.stringify(data, null, 2),
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, assistantMessage]);
     } catch (err: unknown) {
       const error = err instanceof Error ? err.message : 'Something went wrong';
       setMessages(prev => [...prev, {
@@ -154,7 +137,8 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
     const message = messages.find((m) => m.id === messageId);
     if (!message || message.role !== 'assistant') return;
 
-    const files = parseXmlWithRegex(message.content);
+    // Use the new parser for boltArtifact XML
+    const files = parseBoltArtifact(message.content);
     console.log('[2] Parsed files:', files);
 
     if (files.length === 0) {
@@ -182,6 +166,47 @@ export function AIChat({ onGenerateFiles }: AIChatProps) {
     onGenerateFiles(result);
     setGeneratedFiles(prev => new Set([...prev, messageId]));
   };
+
+  // Auto-generate files from the latest assistant message, merging with starter files at response time
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg.role !== 'assistant') return;
+    if (generatedFiles.has(lastMsg.id)) return;
+
+    // Parse AI response files
+    const aiFiles = parseBoltArtifact(lastMsg.content);
+    if (aiFiles.length === 0) return;
+    const extMap: Record<string, string> = {
+      tsx: 'tsx', ts: 'typescript', js: 'javascript', jsx: 'jsx',
+      json: 'json', html: 'html', css: 'css', md: 'markdown',
+      env: 'env', txt: 'text',
+    };
+    const aiResult: Record<string, { content: string; language: string }> = {};
+    for (const { path, content } of aiFiles) {
+      const ext = path.split('.').pop() || 'txt';
+      aiResult[path] = {
+        content,
+        language: extMap[ext] || 'text',
+      };
+    }
+
+    // Parse starter files from reactBasePrompt at response time
+    const starterFilesArr = parseBoltArtifact(reactBasePrompt);
+    const starterResult: Record<string, { content: string; language: string }> = {};
+    for (const { path, content } of starterFilesArr) {
+      const ext = path.split('.').pop() || 'txt';
+      starterResult[path] = {
+        content,
+        language: extMap[ext] || 'text',
+      };
+    }
+
+    // Merge starter and AI files (AI files override starter files)
+    const merged = mergeFiles(starterResult, aiResult);
+    onGenerateFiles(merged);
+    setGeneratedFiles(prev => new Set([...prev, lastMsg.id]));
+  }, [messages, generatedFiles, onGenerateFiles]);
 
   return (
     <div className="flex flex-col h-full border-l">
