@@ -10,6 +10,7 @@ import { AIChat } from '@/components/ai-chat';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import { motion } from "framer-motion";
 
 const parseAIResponse = (response: string) => {
   const decode = (html: string) =>
@@ -183,21 +184,48 @@ export default function GenerateProject() {
   return (
     <div className="flex flex-col h-screen">
       {/* Header */}
-      <div className="p-4 border-b flex justify-between items-center">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
+      <motion.div 
+        className="p-4 border-b flex justify-between items-center fixed top-0 left-0 right-0 z-50 bg-background"
+        initial={{ y: -100, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      >
+        <motion.div 
+          className="flex items-center gap-2"
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+        >
+          <motion.div 
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-primary"
+            whileHover={{ rotate: 5 }}
+          >
             <Code2 className="h-4 w-4 text-primary-foreground" />
-          </div>
-          <span className="font-semibold">Crux.ai</span>
-        </div>
-        <div className="flex items-center gap-2">
+          </motion.div>
+          <motion.span 
+            className="font-semibold"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2 }}
+          >
+            Crux.ai
+          </motion.span>
+        </motion.div>
+        <motion.div 
+          className="flex items-center gap-2"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+        >
           <ThemeToggle />
-          <Button onClick={handleDownloadZip} disabled={!Object.keys(files).length} variant="outline">
-            <Download className="h-4 w-4 mr-2" />
-            Download
-          </Button>
-        </div>
-      </div>
+          <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+            <Button onClick={handleDownloadZip} disabled={!Object.keys(files).length} variant="outline">
+              <Download className="h-4 w-4 mr-2" />
+              Download
+            </Button>
+          </motion.div>
+        </motion.div>
+      </motion.div>
+      <div className="h-16"></div> {/* Spacer for fixed header */}
 
       {/* Body */}
       <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
