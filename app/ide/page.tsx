@@ -12,6 +12,7 @@ import { saveAs } from 'file-saver';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { motion } from "framer-motion";
 
+
 const parseAIResponse = (response: string) => {
   const decode = (html: string) =>
     html
@@ -183,7 +184,9 @@ export default function GenerateProject() {
 
   return (
     <div className="flex flex-col h-screen">
-      {/* Header */}
+    
+
+    
       <motion.div 
         className="p-4 border-b flex justify-between items-center fixed top-0 left-0 right-0 z-50 bg-background"
         initial={{ y: -100, opacity: 0 }}

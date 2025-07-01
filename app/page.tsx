@@ -9,9 +9,17 @@ import Link from "next/link"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { CodeSimulation } from "@/components/code-simulation"
 import { motion, AnimatePresence } from "framer-motion"
+import { useTheme } from "next-themes";
 
+import Dotbg from "@/components/react-bits/dotbg"
 export default function LandingPage() {
   const [isHovered, setIsHovered] = useState<string | null>(null)
+  const { resolvedTheme } = useTheme();
+
+  // Auto-detectable dot colors based on theme
+
+  const themeKey = resolvedTheme === "dark" ? "dark" : "light";
+ 
 
   const features = [
     {
@@ -47,7 +55,9 @@ export default function LandingPage() {
   ]
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground relative overflow-hidden">
+      {/* Dotbg as full background */}
+      
       {/* Header */}
       <motion.header 
         initial={{ y: -100, opacity: 0 }}
@@ -120,10 +130,15 @@ export default function LandingPage() {
           </div>
         </div>
       </motion.header>
+    
 
       {/* Hero Section */}
-      <section className="py-20 px-4">
-        <div className="container mx-auto text-center max-w-4xl">
+      <section className="py-20 px-4 relative overflow-hidden">
+        {/* Dotbg as Hero background */}
+        <div className="absolute inset-0 w-full h-full pointer-events-none z-0">
+          <Dotbg />
+        </div>
+        <div className="container mx-auto text-center max-w-4xl relative z-10">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}

@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from "framer-motion"
 import DotGrid from "@/components/react-bits/dotgrid"
-import SplashCursor from "@/components/react-bits/splash-cursor"
+// import SplashCursor from "@/components/react-bits/splash-cursor"
 
 
 
@@ -64,10 +64,10 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col relative overflow-hidden">
-      <SplashCursor/>
-      <DotGrid />
+    
+    
       
-      
+      <DotGrid/>
      
       
       

@@ -29,6 +29,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Progress } from "@/components/ui/progress"
 
+
+
 export default function GetStartedPage() {
   const [selectedOption, setSelectedOption] = useState<string | null>(null)
   const [gitUrl, setGitUrl] = useState("")
@@ -650,7 +652,7 @@ export default function GetStartedPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
+       
       <motion.header 
         className="border-b border-border/50 bg-background/80 backdrop-blur-sm fixed top-0 left-0 right-0 z-50"
         initial={{ y: -100, opacity: 0 }}
